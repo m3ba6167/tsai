@@ -104,6 +104,14 @@ const App: React.FC = () => {
 
   const recognitionRef = useRef<any>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const viewRef = useRef(view);
+  const activeTabRef = useRef(activeTab);
+  const sessionRef = useRef(0);
+
+  useEffect(() => {
+    viewRef.current = view;
+    activeTabRef.current = activeTab;
+  }, [view, activeTab]);
 
   useEffect(() => {
     const saved = localStorage.getItem('tsai-history');
@@ -134,7 +142,12 @@ const App: React.FC = () => {
       setIsSpeaking(window.speechSynthesis.speaking);
     }, 200);
 
-    return () => clearInterval(speechInterval);
+    return () => {
+      clearInterval(speechInterval);
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
   }, []);
 
   const toggleListening = () => {
@@ -155,12 +168,16 @@ const App: React.FC = () => {
   }, []);
 
   const speak = useCallback((text: string, options: { rate?: number; gender?: 'male' | 'female' } = {}) => {
-    const { rate = 1.0, gender = 'female' } = options;
+    const { rate = 0.9, gender = 'female' } = options;
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const sanitizedText = text.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+      
+      // Remove markdown-style characters but keep punctuation for natural pauses
+      const sanitizedText = text.replace(/[*_#`]/g, '').replace(/\s+/g, ' ').trim();
       if (!sanitizedText) return;
-      const utterance = new SpeechSynthesisUtterance(sanitizedText);
+
+      // Split into sentences for better rhythm and explicit pauses
+      const sentences = sanitizedText.split(/(?<=[.!?])\s+/);
       const voices = window.speechSynthesis.getVoices();
       
       let voice;
@@ -174,15 +191,29 @@ const App: React.FC = () => {
         );
       }
 
-      if (voice) utterance.voice = voice;
-      utterance.rate = rate;
-      utterance.pitch = 1.0;
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
+      sentences.forEach((sentence, index) => {
+        const utterance = new SpeechSynthesisUtterance(sentence.trim());
+        if (voice) utterance.voice = voice;
+        utterance.rate = rate;
+        utterance.pitch = 1.0;
+        
+        if (index === 0) {
+          utterance.onstart = () => setIsSpeaking(true);
+        }
+        if (index === sentences.length - 1) {
+          utterance.onend = () => setIsSpeaking(false);
+          utterance.onerror = () => setIsSpeaking(false);
+        }
+        
+        window.speechSynthesis.speak(utterance);
+      });
     }
   }, []);
+
+  useEffect(() => {
+    sessionRef.current += 1;
+    stopSpeaking();
+  }, [view, activeTab, stopSpeaking]);
 
   const fetchWordOfDay = async (country?: string) => {
     setIsWordLoading(true);
@@ -360,21 +391,29 @@ const App: React.FC = () => {
     setLoading(true);
     setResponse('');
     setSources([]);
+    const currentSession = sessionRef.current;
     try {
       // Use streaming to make answers feel much faster
       const result = await getGeminiResponse(queryToUse, activeTab, grade, personality, (t) => {
-        setResponse(t);
+        if (sessionRef.current === currentSession) {
+          setResponse(t);
+        }
       });
       
+      if (sessionRef.current !== currentSession) return;
+
       setResponse(result.text);
       setSources(result.sources || []);
       
-      if (activeTab === ToolType.MATH) {
-        const lines = result.text.split('\n');
-        const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer'));
-        speak(finalAnswerLine || lines[0] || result.text);
-      } else if (activeTab !== ToolType.MOTIVATION) {
-        speak(result.text);
+      // Only speak if the user is still on the same tool and view
+      if (viewRef.current === ViewState.TOOL && activeTabRef.current === activeTab) {
+        if (activeTab === ToolType.MATH) {
+          const lines = result.text.split('\n');
+          const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer'));
+          speak(finalAnswerLine || lines[0] || result.text);
+        } else if (activeTab !== ToolType.MOTIVATION) {
+          speak(result.text);
+        }
       }
       
       const newItem: HistoryItem = { id: Date.now().toString(), type: activeTab, query: queryToUse, response: result.text, timestamp: Date.now() };
@@ -454,10 +493,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen relative flex flex-col text-slate-600 antialiased pb-safe overflow-x-hidden">
+    <div className="min-h-screen relative flex flex-col text-slate-600 antialiased pt-safe pb-safe overflow-x-hidden silver-white-bg">
       <BackgroundEffect density={50} />
       
-      <div className="fixed top-3 right-3 sm:top-8 sm:right-8 z-[80] animate-in slide-in-from-right-4 duration-500">
+      <div className="fixed top-3 right-3 sm:top-8 sm:right-8 z-[80] animate-in slide-in-from-right-4 duration-500 pt-safe pr-safe">
         <div className="glass-panel px-3 py-2 sm:px-6 sm:py-4 rounded-[1.25rem] sm:rounded-[2rem] shadow-xl border-slate-200 flex items-center gap-3">
           <div className="flex flex-col items-end">
             <p className="text-[7px] sm:text-[10px] font-black text-amber-600 uppercase tracking-widest leading-tight">Verified</p>
@@ -472,8 +511,8 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <header className="z-10 px-4 py-8 sm:py-12 sm:pt-24 flex flex-col items-center">
-        <h1 className="text-5xl sm:text-8xl md:text-9xl ai-title-text premium-font select-none mb-1">TSAI</h1>
+      <header className="z-10 px-4 py-6 sm:py-12 sm:pt-24 flex flex-col items-center">
+        <h1 className="text-4xl sm:text-8xl md:text-9xl ai-title-text premium-font select-none mb-1">TSAI</h1>
         <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
             <Sparkles className="w-4 h-4 text-amber-500" />
             <p className="text-slate-400 text-[8px] sm:text-[11px] font-bold uppercase tracking-[0.3em]">Advanced Intelligence Core</p>
@@ -499,7 +538,7 @@ const App: React.FC = () => {
         {view === ViewState.HOME ? (
           <div className="space-y-6 sm:space-y-8 max-w-5xl mx-auto">
             <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-4 sm:gap-8">
-              <div className="glass-panel p-6 sm:p-10 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-xl overflow-hidden relative group flex flex-col justify-between min-h-[280px] sm:min-h-[320px]">
+              <div className="glass-panel p-5 sm:p-10 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-xl overflow-hidden relative group flex flex-col justify-between min-h-[240px] sm:min-h-[320px]">
                 <div className="absolute top-0 right-0 w-48 h-48 bg-slate-50 rounded-full -translate-y-24 translate-x-24 blur-3xl opacity-30"></div>
                 <div className="flex flex-col items-center gap-4 sm:gap-6 relative z-10 py-2 sm:py-4">
                   <div className="flex flex-col text-center w-full">
@@ -657,7 +696,7 @@ const App: React.FC = () => {
 
             {activeTab === ToolType.CODING ? (
               <div className="flex flex-col gap-4 animate-in fade-in duration-700">
-                <div className="glass-panel overflow-hidden rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl relative min-h-[600px] flex border border-slate-200 bg-[#fefefe]">
+                <div className="glass-panel overflow-hidden rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl relative min-h-[400px] sm:min-h-[600px] flex border border-slate-200 bg-[#fefefe]">
                   
                   {/* VS Code Inspired Sidebar */}
                   <div className="w-12 sm:w-16 bg-[#f3f3f3] border-r border-slate-200 flex flex-col items-center py-6 gap-6 shrink-0">
@@ -757,16 +796,18 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <ResponseView content={response} loading={loading} sources={sources} onSpeak={() => { if (activeTab === ToolType.MATH) { const lines = response.split('\n'); const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer')); speak(finalAnswerLine || response); } else { speak(response); } }} onStopSpeak={stopSpeaking} isSpeaking={isSpeaking} />
+                <div className="w-full max-w-4xl mx-auto">
+                  <ResponseView content={response} loading={loading} sources={sources} onSpeak={() => { if (activeTab === ToolType.MATH) { const lines = response.split('\n'); const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer')); speak(finalAnswerLine || response); } else { speak(response); } }} onStopSpeak={stopSpeaking} isSpeaking={isSpeaking} />
+                </div>
               </>
             )}
           </div>
         )}
       </main>
 
-      <div className="fixed bottom-4 right-4 sm:bottom-10 sm:right-10 z-[70] flex flex-col items-end gap-3">
+      <div className="fixed bottom-4 right-4 sm:bottom-10 sm:right-10 z-[70] flex flex-col items-end gap-3 pb-safe pr-safe">
         {showHistory && (
-          <div className="glass-panel w-[calc(100vw-2rem)] sm:w-80 max-h-[60vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-300 border-slate-200">
+          <div className="glass-panel w-[calc(100vw-2rem)] sm:w-80 max-h-[50vh] sm:max-h-[60vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-300 border-slate-200">
             <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white/50">
               <h3 className="text-[10px] font-black uppercase tracking-widest ai-title-text premium-font flex items-center gap-2">
                 <History className="w-4 h-4 text-amber-500" /> Session Logs
