@@ -37,8 +37,20 @@ import {
   Search,
   Layout,
   Settings,
-  ArrowLeft
+  ArrowLeft,
+  FileUp,
+  BrainCircuit,
+  BookOpenCheck,
+  ChevronRight,
+  Eye,
+  CheckCircle2,
+  Accessibility,
+  Network,
+  Send,
+  Volume2,
+  Square
 } from 'lucide-react';
+import Markdown from 'react-markdown';
 import ResponseView from './components/ResponseView.tsx';
 import BackgroundEffect from './components/BackgroundEffect.tsx';
 import { getGeminiResponse } from './services/geminiService.ts';
@@ -54,7 +66,8 @@ const GRADES = [
 
 const PERSONALITIES = Object.values(PersonalityType);
 
-const FORBIDDEN_WORDS = ['badword1', 'badword2', 'idiot', 'stupid', 'fuck', 'shit', 'asshole', 'bitch'];
+const FORBIDDEN_WORDS = ['badword1', 'badword2', 'idiot', 'stupid', 'fuck', 'shit', 'asshole', 'bitch', 'dumb'];
+const ADMIN_EMAIL = 'kanimation641@gmail.com';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>(ViewState.AUTH);
@@ -102,11 +115,32 @@ const App: React.FC = () => {
   const [codeContent, setCodeContent] = useState(''); 
   const [isPreviewing, setIsPreviewing] = useState(false);
 
+  // Study Generator specific state
+  const [studySet, setStudySet] = useState<{ summary: string; flashcards: any[]; quiz: any[] } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{ data: string; mimeType: string; name: string } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [activeStudyTab, setActiveStudyTab] = useState<'summary' | 'flashcards' | 'quiz'>('summary');
+  const [currentFlashcard, setCurrentFlashcard] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({});
+  const [showQuizResults, setShowQuizResults] = useState(false);
+
+  const [isDyslexiaMode, setIsDyslexiaMode] = useState(() => localStorage.getItem('tsai-dyslexia') === 'true');
+
   const recognitionRef = useRef<any>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const viewRef = useRef(view);
   const activeTabRef = useRef(activeTab);
   const sessionRef = useRef(0);
+
+  useEffect(() => {
+    localStorage.setItem('tsai-dyslexia', String(isDyslexiaMode));
+    if (isDyslexiaMode) {
+      document.body.classList.add('dyslexia-mode');
+    } else {
+      document.body.classList.remove('dyslexia-mode');
+    }
+  }, [isDyslexiaMode]);
 
   useEffect(() => {
     viewRef.current = view;
@@ -291,6 +325,32 @@ const App: React.FC = () => {
     return FORBIDDEN_WORDS.some(word => lower.includes(word));
   };
 
+  const cancelBan = () => {
+    setBanUntil(0);
+    localStorage.removeItem('tsai-ban-until');
+    setIsBanned(false);
+    setBanTimeRemaining(0);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      const data = base64.split(',')[1];
+      setSelectedFile({
+        data,
+        mimeType: file.type,
+        name: file.name
+      });
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const getUsername = (email: string) => email.split('@')[0];
 
   const handleLogin = (e?: React.FormEvent) => {
@@ -383,7 +443,9 @@ const App: React.FC = () => {
   const handleSubmit = async (e?: React.FormEvent, customQuery?: string) => {
     if (e) e.preventDefault();
     const queryToUse = customQuery || input;
-    if (!queryToUse.trim() || loading || isBanned) return;
+    if (!queryToUse.trim() && !selectedFile && !loading && !isBanned) return;
+    if (loading || isBanned) return;
+    
     if (containsForbidden(queryToUse)) {
       triggerBan();
       return;
@@ -393,21 +455,39 @@ const App: React.FC = () => {
     setSources([]);
     const currentSession = sessionRef.current;
     try {
-      // Use streaming to make answers feel much faster
-      const result = await getGeminiResponse(queryToUse, activeTab, grade, personality, (t) => {
-        if (sessionRef.current === currentSession) {
-          setResponse(t);
-        }
-      });
+      const result = await getGeminiResponse(
+        queryToUse, 
+        activeTab, 
+        grade, 
+        personality, 
+        (t) => {
+          if (sessionRef.current === currentSession) {
+            setResponse(t);
+          }
+        },
+        selectedFile ? { data: selectedFile.data, mimeType: selectedFile.mimeType } : undefined
+      );
       
       if (sessionRef.current !== currentSession) return;
+
+      if (activeTab === ToolType.STUDY) {
+        try {
+          const parsed = JSON.parse(result.text);
+          setStudySet(parsed);
+          setActiveStudyTab('summary');
+        } catch (e) {
+          console.error("Failed to parse study set JSON", e);
+        }
+      }
 
       setResponse(result.text);
       setSources(result.sources || []);
       
       // Only speak if the user is still on the same tool and view
       if (viewRef.current === ViewState.TOOL && activeTabRef.current === activeTab) {
-        if (activeTab === ToolType.MATH) {
+        if (personality === PersonalityType.SOCRATIC) {
+          speak(result.text);
+        } else if (activeTab === ToolType.MATH) {
           const lines = result.text.split('\n');
           const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer'));
           speak(finalAnswerLine || lines[0] || result.text);
@@ -432,6 +512,8 @@ const App: React.FC = () => {
     setView(ViewState.TOOL);
     setResponse('');
     setSources([]);
+    setStudySet(null);
+    setSelectedFile(null);
     setInput('');
     setIsPreviewing(false); 
     if (type === ToolType.FACT) {
@@ -450,8 +532,18 @@ const App: React.FC = () => {
 
   if (isBanned) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center">
+      <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center relative">
         <BackgroundEffect density={30} />
+        
+        {userEmail === ADMIN_EMAIL && (
+          <button 
+            onClick={cancelBan}
+            className="fixed top-6 right-6 z-[100] glass-panel px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-amber-600 hover:bg-amber-50 transition-all active:scale-95 flex items-center gap-2 border-amber-200"
+          >
+            <X className="w-3 h-3" /> Cancel Timeout
+          </button>
+        )}
+
         <div className="z-50 glass-panel p-8 sm:p-12 rounded-[2rem] sm:rounded-[3rem] shadow-2xl max-w-md w-full">
           <div className="w-16 h-16 sm:w-24 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse"><Ban className="w-8 h-8 text-amber-600" /></div>
           <h2 className="text-2xl sm:text-4xl font-black ai-title-text uppercase tracking-tighter premium-font">PROTOCOL SUSPENDED</h2>
@@ -459,6 +551,7 @@ const App: React.FC = () => {
             <p className="text-[9px] text-slate-400 font-black uppercase mb-1 tracking-widest">Restoring In</p>
             <div className="text-3xl sm:text-5xl font-black text-amber-600 tabular-nums">{Math.floor(banTimeRemaining / 60)}:{String(banTimeRemaining % 60).padStart(2, '0')}</div>
           </div>
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest leading-relaxed">Inappropriate language detected. Maintain excellence.</p>
         </div>
       </div>
     );
@@ -493,10 +586,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen relative flex flex-col text-slate-600 antialiased pt-safe pb-safe overflow-x-hidden silver-white-bg">
+    <div className="min-h-screen relative flex flex-col text-slate-600 antialiased overflow-x-hidden silver-white-bg">
       <BackgroundEffect density={50} />
       
-      <div className="fixed top-3 right-3 sm:top-8 sm:right-8 z-[80] animate-in slide-in-from-right-4 duration-500 pt-safe pr-safe">
+      <div className="fixed top-3 right-3 sm:top-8 sm:right-8 z-[80] animate-in slide-in-from-right-4 duration-500">
         <div className="glass-panel px-3 py-2 sm:px-6 sm:py-4 rounded-[1.25rem] sm:rounded-[2rem] shadow-xl border-slate-200 flex items-center gap-3">
           <div className="flex flex-col items-end">
             <p className="text-[7px] sm:text-[10px] font-black text-amber-600 uppercase tracking-widest leading-tight">Verified</p>
@@ -511,8 +604,8 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <header className="z-10 px-4 py-6 sm:py-12 sm:pt-24 flex flex-col items-center">
-        <h1 className="text-4xl sm:text-8xl md:text-9xl ai-title-text premium-font select-none mb-1">TSAI</h1>
+      <header className="z-10 px-4 py-8 sm:py-12 sm:pt-24 flex flex-col items-center">
+        <h1 className="text-5xl sm:text-8xl md:text-9xl ai-title-text premium-font select-none mb-1">TSAI</h1>
         <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
             <Sparkles className="w-4 h-4 text-amber-500" />
             <p className="text-slate-400 text-[8px] sm:text-[11px] font-bold uppercase tracking-[0.3em]">Advanced Intelligence Core</p>
@@ -538,7 +631,7 @@ const App: React.FC = () => {
         {view === ViewState.HOME ? (
           <div className="space-y-6 sm:space-y-8 max-w-5xl mx-auto">
             <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-4 sm:gap-8">
-              <div className="glass-panel p-5 sm:p-10 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-xl overflow-hidden relative group flex flex-col justify-between min-h-[240px] sm:min-h-[320px]">
+              <div className="glass-panel p-6 sm:p-10 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-xl overflow-hidden relative group flex flex-col justify-between min-h-[280px] sm:min-h-[320px]">
                 <div className="absolute top-0 right-0 w-48 h-48 bg-slate-50 rounded-full -translate-y-24 translate-x-24 blur-3xl opacity-30"></div>
                 <div className="flex flex-col items-center gap-4 sm:gap-6 relative z-10 py-2 sm:py-4">
                   <div className="flex flex-col text-center w-full">
@@ -672,13 +765,106 @@ const App: React.FC = () => {
                 <h2 className="text-xs sm:text-sm font-black ai-title-text premium-font leading-tight">Motivation</h2>
                 <p className="text-slate-400 text-[7px] sm:text-[8px] uppercase tracking-widest font-extrabold mt-1">Drive</p>
               </button>
-              <button onClick={() => openTool(ToolType.STORY)} className="group glass-panel p-5 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] hover:translate-y-[-8px] transition-all text-center">
+              <button onClick={() => openTool(ToolType.STUDY)} className="group glass-panel p-5 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] hover:translate-y-[-8px] transition-all text-center">
                 <div className="w-12 sm:w-16 h-12 sm:h-16 tool-icon-silver rounded-xl sm:rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-sm group-hover:border-amber-400 group-hover:scale-105 transition-all">
-                  <BookOpen className="w-6 sm:w-8 h-6 sm:h-8" />
+                  <BrainCircuit className="w-6 sm:w-8 h-6 sm:h-8" />
                 </div>
-                <h2 className="text-xs sm:text-sm font-black ai-title-text premium-font leading-tight">Tales</h2>
-                <p className="text-slate-400 text-[7px] sm:text-[8px] uppercase tracking-widest font-extrabold mt-1">Narrate</p>
+                <h2 className="text-xs sm:text-sm font-black ai-title-text premium-font leading-tight">Study Gen</h2>
+                <p className="text-slate-400 text-[7px] sm:text-[8px] uppercase tracking-widest font-extrabold mt-1">Mastery</p>
               </button>
+              <button onClick={() => openTool(ToolType.VOICE_CONCEPT)} className="group glass-panel p-5 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] hover:translate-y-[-8px] transition-all text-center">
+                <div className="w-12 sm:w-16 h-12 sm:h-16 tool-icon-silver rounded-xl sm:rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-sm group-hover:border-amber-400 group-hover:scale-105 transition-all">
+                  <Network className="w-6 sm:w-8 h-6 sm:h-8" />
+                </div>
+                <h2 className="text-xs sm:text-sm font-black ai-title-text premium-font leading-tight">Voice Architect</h2>
+                <p className="text-slate-400 text-[7px] sm:text-[8px] uppercase tracking-widest font-extrabold mt-1">Concept Map</p>
+              </button>
+            </div>
+          </div>
+        ) : view === ViewState.TALES ? (
+          <div className="fixed inset-0 z-[100] bg-black overflow-hidden flex flex-col">
+            <div className="absolute inset-0 opacity-40">
+              <div className="absolute inset-0 bg-gradient-to-b from-amber-900/20 to-black"></div>
+              <div className="absolute top-[20%] left-[10%] w-[40vw] h-[40vw] bg-amber-600/20 rounded-full blur-[120px] animate-pulse"></div>
+              <div className="absolute bottom-[10%] right-[5%] w-[50vw] h-[50vw] bg-orange-900/20 rounded-full blur-[150px] animate-pulse delay-1000"></div>
+            </div>
+
+            <div className="relative z-10 flex flex-col h-full">
+              <header className="p-6 sm:p-10 flex items-center justify-between">
+                <button 
+                  onClick={() => setView(ViewState.HOME)}
+                  className="group flex items-center gap-3 text-white/60 hover:text-white transition-all"
+                >
+                  <div className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center group-hover:border-white/50 transition-all">
+                    <ChevronLeft className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">Return to Hub</span>
+                </button>
+                <div className="flex items-center gap-4">
+                  <div className="hidden sm:flex flex-col items-end">
+                    <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Immersive Mode</span>
+                    <span className="text-[8px] text-white/40 uppercase tracking-widest">Atmospheric Narrator</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                    <BookOpen className="w-6 h-6 text-amber-500" />
+                  </div>
+                </div>
+              </header>
+
+              <main className="flex-1 overflow-y-auto px-6 sm:px-10 pb-20 scrollbar-hide">
+                <div className="max-w-4xl mx-auto pt-10 sm:pt-20">
+                  <div className="mb-12 sm:mb-20">
+                    <h1 className="text-6xl sm:text-9xl font-black text-white premium-font leading-[0.85] tracking-tighter mb-6">
+                      TALES<span className="text-amber-500">.</span>
+                    </h1>
+                    <p className="text-white/40 text-sm sm:text-xl max-w-xl leading-relaxed">
+                      Where logic meets imagination. Narrate your curriculum into cinematic stories that stick.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-12">
+                    <div className="space-y-6">
+                      <div className="relative group">
+                        <textarea
+                          value={input}
+                          onChange={(e) => setInput(e.target.value)}
+                          placeholder="What story shall we weave today? (e.g., The French Revolution as a space opera)"
+                          className="w-full bg-white/5 border border-white/10 rounded-[2rem] p-8 sm:p-12 text-white text-xl sm:text-3xl font-medium focus:ring-4 focus:ring-amber-500/20 outline-none placeholder:text-white/10 transition-all min-h-[200px] sm:min-h-[300px] resize-none"
+                        />
+                        <button 
+                          onClick={() => {
+                            setActiveTab(ToolType.STORY);
+                            handleSubmit();
+                          }}
+                          disabled={loading || !input.trim()}
+                          className="absolute bottom-6 right-6 sm:bottom-10 sm:right-10 p-4 sm:p-6 rounded-full bg-amber-500 text-black hover:bg-amber-400 transition-all shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed group-hover:scale-110"
+                        >
+                          <Send className="w-6 h-6 sm:w-8 sm:h-8" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {response && (
+                      <div className="animate-in fade-in slide-in-from-bottom-12 duration-1000">
+                        <div className="p-8 sm:p-16 rounded-[3rem] bg-white/5 border border-white/10 backdrop-blur-3xl relative">
+                          <div className="absolute top-8 right-8 flex gap-3">
+                            {isSpeaking ? (
+                              <button onClick={stopSpeaking} className="p-4 rounded-2xl bg-amber-500 text-black animate-pulse"><Square className="w-5 h-5 fill-current" /></button>
+                            ) : (
+                              <button onClick={() => speak(response)} className="p-4 rounded-2xl bg-white/10 text-white hover:bg-white/20 transition-all"><Volume2 className="w-5 h-5" /></button>
+                            )}
+                          </div>
+                          <div className="prose prose-invert prose-lg sm:prose-2xl max-w-none">
+                            <div className="markdown-body text-white/80 leading-relaxed font-serif italic">
+                              <Markdown>{response}</Markdown>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </main>
             </div>
           </div>
         ) : (
@@ -696,7 +882,7 @@ const App: React.FC = () => {
 
             {activeTab === ToolType.CODING ? (
               <div className="flex flex-col gap-4 animate-in fade-in duration-700">
-                <div className="glass-panel overflow-hidden rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl relative min-h-[400px] sm:min-h-[600px] flex border border-slate-200 bg-[#fefefe]">
+                <div className="glass-panel overflow-hidden rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl relative min-h-[600px] flex border border-slate-200 bg-[#fefefe]">
                   
                   {/* VS Code Inspired Sidebar */}
                   <div className="w-12 sm:w-16 bg-[#f3f3f3] border-r border-slate-200 flex flex-col items-center py-6 gap-6 shrink-0">
@@ -772,6 +958,230 @@ const App: React.FC = () => {
                   </div>
                 </div>
               </div>
+            ) : activeTab === ToolType.STUDY ? (
+              <div className="flex flex-col gap-6 animate-in fade-in duration-700">
+                {!studySet ? (
+                  <div className="glass-panel p-8 sm:p-16 rounded-[2rem] sm:rounded-[3rem] shadow-2xl flex flex-col items-center text-center max-w-3xl mx-auto w-full">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-amber-50 rounded-[2rem] flex items-center justify-center mb-8 shadow-inner">
+                      <FileUp className="w-10 h-10 sm:w-12 sm:h-12 text-amber-600" />
+                    </div>
+                    <h2 className="text-3xl sm:text-5xl font-black ai-title-text premium-font mb-4">Study Set Architect</h2>
+                    <p className="text-slate-400 text-sm sm:text-lg font-medium max-w-lg mb-10 leading-relaxed">
+                      Transform static materials into interactive mastery tools. Upload a photo of your notes or a PDF to begin.
+                    </p>
+                    
+                    <div className="w-full max-w-md">
+                      <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-slate-200 rounded-[2rem] cursor-pointer hover:bg-slate-50 transition-all group relative overflow-hidden">
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6 relative z-10">
+                          <Files className="w-8 h-8 text-slate-300 group-hover:text-amber-500 transition-colors mb-2" />
+                          <p className="text-xs sm:text-sm font-bold text-slate-400 group-hover:text-slate-600">
+                            {selectedFile ? selectedFile.name : "Drop notes or click to browse"}
+                          </p>
+                          {selectedFile && (
+                            <button 
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedFile(null); }}
+                              className="mt-2 text-[8px] font-black uppercase text-red-500 hover:text-red-600 transition-colors"
+                            >
+                              Clear File
+                            </button>
+                          )}
+                          <p className="text-[10px] text-slate-300 mt-1 uppercase tracking-widest font-black">Images or PDF supported</p>
+                        </div>
+                        <input type="file" className="hidden" onChange={handleFileChange} accept="image/*,application/pdf" />
+                        {isUploading && (
+                          <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-20">
+                            <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
+                          </div>
+                        )}
+                      </label>
+                    </div>
+
+                    <div className="mt-10 w-full max-w-md">
+                      <div className="relative group">
+                        <input 
+                          type="text" 
+                          value={input} 
+                          onChange={(e) => setInput(e.target.value)}
+                          placeholder="Specific focus area? (Optional)"
+                          className="w-full bg-slate-50 border border-slate-100 p-4 sm:p-6 rounded-2xl sm:rounded-3xl text-slate-900 text-sm sm:text-base font-medium focus:ring-4 focus:ring-amber-50 outline-none placeholder:text-slate-300 transition-all"
+                        />
+                      </div>
+                      <button 
+                        onClick={() => handleSubmit()}
+                        disabled={loading || (!selectedFile && !input.trim())}
+                        className="w-full mt-4 py-5 sm:py-6 premium-button-gold rounded-2xl sm:rounded-3xl font-black text-xs sm:text-sm uppercase tracking-[0.2em] shadow-2xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all disabled:opacity-50"
+                      >
+                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                        Generate Study Set
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-6">
+                    <div className="flex items-center justify-between glass-panel p-2 rounded-2xl sm:rounded-3xl shadow-lg max-w-2xl mx-auto w-full">
+                      <button 
+                        onClick={() => setActiveStudyTab('summary')}
+                        className={`flex-1 py-3 sm:py-4 rounded-xl sm:rounded-2xl text-[9px] sm:text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeStudyTab === 'summary' ? 'premium-button-gold shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}
+                      >
+                        <Files className="w-4 h-4" /> Summary
+                      </button>
+                      <button 
+                        onClick={() => setActiveStudyTab('flashcards')}
+                        className={`flex-1 py-3 sm:py-4 rounded-xl sm:rounded-2xl text-[9px] sm:text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeStudyTab === 'flashcards' ? 'premium-button-gold shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}
+                      >
+                        <BrainCircuit className="w-4 h-4" /> Flashcards
+                      </button>
+                      <button 
+                        onClick={() => setActiveStudyTab('quiz')}
+                        className={`flex-1 py-3 sm:py-4 rounded-xl sm:rounded-2xl text-[9px] sm:text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeStudyTab === 'quiz' ? 'premium-button-gold shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}
+                      >
+                        <BookOpenCheck className="w-4 h-4" /> Quiz
+                      </button>
+                    </div>
+
+                    <div className="max-w-4xl mx-auto w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      {activeStudyTab === 'summary' && (
+                        <div className="glass-panel p-8 sm:p-12 rounded-[2rem] sm:rounded-[3rem] shadow-2xl">
+                          <div className="flex items-center gap-3 mb-8">
+                            <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center"><Files className="w-5 h-5 text-amber-600" /></div>
+                            <div>
+                              <h3 className="text-xl sm:text-2xl font-black ai-title-text premium-font">Simplified Summary</h3>
+                              <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Base Understanding Protocol</p>
+                            </div>
+                          </div>
+                          <div className="prose prose-slate max-w-none prose-p:text-slate-600 prose-p:leading-relaxed prose-p:text-lg sm:prose-p:text-xl prose-p:font-medium">
+                            {studySet.summary}
+                          </div>
+                          <div className="mt-10 pt-8 border-t border-slate-100 flex justify-end">
+                            <button onClick={() => setActiveStudyTab('flashcards')} className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-amber-600 hover:gap-4 transition-all">
+                              Next: Flashcards <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {activeStudyTab === 'flashcards' && (
+                        <div className="flex flex-col items-center gap-8">
+                          <div 
+                            onClick={() => setIsFlipped(!isFlipped)}
+                            className="w-full max-w-xl aspect-[4/3] relative cursor-pointer group perspective-1000"
+                          >
+                            <div className={`relative w-full h-full transition-all duration-700 preserve-3d ${isFlipped ? 'rotate-y-180' : ''}`}>
+                              {/* Front */}
+                              <div className="absolute inset-0 backface-hidden glass-panel rounded-[2rem] sm:rounded-[3rem] shadow-2xl flex flex-col items-center justify-center p-10 text-center border-2 border-slate-100">
+                                <span className="absolute top-8 left-10 text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Concept</span>
+                                <h3 className="text-2xl sm:text-4xl font-black text-slate-800 premium-font leading-tight">
+                                  {studySet.flashcards[currentFlashcard]?.front}
+                                </h3>
+                                <div className="absolute bottom-8 flex items-center gap-2 text-[9px] font-black text-amber-500 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Eye className="w-3 h-3" /> Click to reveal
+                                </div>
+                              </div>
+                              {/* Back */}
+                              <div className="absolute inset-0 backface-hidden rotate-y-180 glass-panel rounded-[2rem] sm:rounded-[3rem] shadow-2xl flex flex-col items-center justify-center p-10 text-center border-2 border-amber-100 bg-amber-50/30">
+                                <span className="absolute top-8 left-10 text-[10px] font-black text-amber-400 uppercase tracking-[0.3em]">Explanation</span>
+                                <p className="text-lg sm:text-2xl font-medium text-slate-700 leading-relaxed">
+                                  {studySet.flashcards[currentFlashcard]?.back}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-6">
+                            <button 
+                              disabled={currentFlashcard === 0}
+                              onClick={() => { setCurrentFlashcard(prev => prev - 1); setIsFlipped(false); }}
+                              className="p-4 rounded-full glass-panel shadow-lg hover:scale-110 transition-all disabled:opacity-30"
+                            >
+                              <ChevronLeft className="w-6 h-6" />
+                            </button>
+                            <div className="px-6 py-2 rounded-full bg-slate-100 text-[11px] font-black text-slate-400 uppercase tracking-widest">
+                              {currentFlashcard + 1} / {studySet.flashcards.length}
+                            </div>
+                            <button 
+                              disabled={currentFlashcard === studySet.flashcards.length - 1}
+                              onClick={() => { setCurrentFlashcard(prev => prev + 1); setIsFlipped(false); }}
+                              className="p-4 rounded-full glass-panel shadow-lg hover:scale-110 transition-all disabled:opacity-30"
+                            >
+                              <ChevronRight className="w-6 h-6" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {activeStudyTab === 'quiz' && (
+                        <div className="glass-panel p-8 sm:p-12 rounded-[2rem] sm:rounded-[3rem] shadow-2xl">
+                          <div className="flex items-center justify-between mb-10">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center"><BookOpenCheck className="w-5 h-5 text-amber-600" /></div>
+                              <div>
+                                <h3 className="text-xl sm:text-2xl font-black ai-title-text premium-font">Mastery Quiz</h3>
+                                <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Precision Assessment</p>
+                              </div>
+                            </div>
+                            {showQuizResults && (
+                              <button onClick={() => { setQuizAnswers({}); setShowQuizResults(false); }} className="text-[9px] font-black uppercase text-amber-600 hover:underline">Reset</button>
+                            )}
+                          </div>
+
+                          <div className="space-y-10">
+                            {studySet.quiz.map((q, idx) => (
+                              <div key={idx} className="space-y-4">
+                                <h4 className="text-lg sm:text-xl font-black text-slate-800 flex gap-3">
+                                  <span className="text-amber-500">{idx + 1}.</span> {q.question}
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {q.options.map((opt, optIdx) => {
+                                    const isSelected = quizAnswers[idx] === opt;
+                                    const isCorrect = opt === q.answer;
+                                    let style = "border-slate-100 hover:border-amber-200 hover:bg-slate-50";
+                                    if (showQuizResults) {
+                                      if (isCorrect) style = "border-emerald-500 bg-emerald-50 text-emerald-700";
+                                      else if (isSelected) style = "border-rose-500 bg-rose-50 text-rose-700";
+                                      else style = "opacity-50 border-slate-100";
+                                    } else if (isSelected) {
+                                      style = "border-amber-500 bg-amber-50 text-amber-700";
+                                    }
+
+                                    return (
+                                      <button 
+                                        key={optIdx}
+                                        disabled={showQuizResults}
+                                        onClick={() => setQuizAnswers(prev => ({ ...prev, [idx]: opt }))}
+                                        className={`p-4 rounded-2xl border-2 text-left font-bold text-sm sm:text-base transition-all flex items-center justify-between group ${style}`}
+                                      >
+                                        {opt}
+                                        {showQuizResults && isCorrect && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                                        {showQuizResults && isSelected && !isCorrect && <X className="w-5 h-5 text-rose-500" />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {showQuizResults && (
+                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in fade-in duration-500">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Explanation</p>
+                                    <p className="text-sm font-medium text-slate-600">{q.explanation}</p>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          {!showQuizResults && (
+                            <button 
+                              onClick={() => setShowQuizResults(true)}
+                              disabled={Object.keys(quizAnswers).length < studySet.quiz.length}
+                              className="w-full mt-12 py-5 sm:py-6 premium-button-gold rounded-2xl sm:rounded-3xl font-black text-xs sm:text-sm uppercase tracking-[0.2em] shadow-2xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all disabled:opacity-50"
+                            >
+                              Submit Assessment
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <div className="relative group flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -783,7 +1193,7 @@ const App: React.FC = () => {
                       autoFocus 
                       onChange={(e) => setInput(e.target.value)} 
                       onKeyDown={(e) => e.key === 'Enter' && handleSubmit()} 
-                      placeholder={activeTab === ToolType.STORY ? "Construct narrative..." : activeTab === ToolType.MATH ? `Process equation...` : activeTab === ToolType.SCIENCE ? "Analyze objective..." : `Consult Archive...`} 
+                      placeholder={activeTab === ToolType.STORY ? "Construct narrative..." : activeTab === ToolType.MATH ? `Process equation...` : activeTab === ToolType.SCIENCE ? "Analyze objective..." : activeTab === ToolType.VOICE_CONCEPT ? "Speak your thoughts or type ramblings..." : `Consult Archive...`} 
                       className="w-full bg-white border border-slate-200 p-5 sm:p-8 rounded-[1.25rem] sm:rounded-[2rem] text-slate-900 text-base sm:text-xl font-medium focus:ring-4 focus:ring-amber-50 outline-none placeholder:text-slate-300 transition-all shadow-xl backdrop-blur-md pr-12 sm:pr-40" 
                     />
                     <div className="absolute right-2 top-2 sm:right-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-1.5">
@@ -796,18 +1206,42 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <div className="w-full max-w-4xl mx-auto">
-                  <ResponseView content={response} loading={loading} sources={sources} onSpeak={() => { if (activeTab === ToolType.MATH) { const lines = response.split('\n'); const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer')); speak(finalAnswerLine || response); } else { speak(response); } }} onStopSpeak={stopSpeaking} isSpeaking={isSpeaking} />
-                </div>
+                <ResponseView content={response} loading={loading} sources={sources} onSpeak={() => { if (activeTab === ToolType.MATH) { const lines = response.split('\n'); const finalAnswerLine = lines.reverse().find(line => line.toLowerCase().includes('final answer')); speak(finalAnswerLine || response); } else { speak(response); } }} onStopSpeak={stopSpeaking} isSpeaking={isSpeaking} />
               </>
             )}
           </div>
         )}
       </main>
 
-      <div className="fixed bottom-4 right-4 sm:bottom-10 sm:right-10 z-[70] flex flex-col items-end gap-3 pb-safe pr-safe">
+      <div className="fixed bottom-4 left-4 sm:bottom-10 sm:left-10 z-[70]">
+        <button 
+          onClick={() => setIsDyslexiaMode(!isDyslexiaMode)}
+          className={`p-3 sm:p-4 rounded-full shadow-2xl transition-all active:scale-95 flex items-center gap-2 font-black uppercase text-[9px] tracking-widest ${isDyslexiaMode ? 'bg-black text-white' : 'glass-panel text-slate-600 hover:bg-slate-50'}`}
+          title="Toggle Dyslexia Mode"
+        >
+          <Accessibility className="w-4 h-4 sm:w-5 sm:h-5" />
+          <span className="hidden sm:inline">{isDyslexiaMode ? 'Dyslexia Mode: ON' : 'Dyslexia Mode'}</span>
+        </button>
+      </div>
+
+      <div className="fixed right-0 top-1/2 -translate-y-1/2 z-[60] flex flex-col gap-2">
+        <button 
+          onClick={() => {
+            setInput('');
+            setResponse('');
+            setView(ViewState.TALES);
+          }}
+          className="group bg-black text-white p-4 sm:p-6 rounded-l-[2rem] sm:rounded-l-[3rem] shadow-2xl flex flex-col items-center gap-4 hover:pl-10 sm:hover:pl-12 transition-all active:scale-95 border-y border-l border-white/10"
+          title="Open Immersive Tales"
+        >
+          <BookOpen className="w-6 h-6 sm:w-8 sm:h-8 text-amber-500" />
+          <span className="[writing-mode:vertical-lr] rotate-180 text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] py-2">Tales</span>
+        </button>
+      </div>
+
+      <div className="fixed bottom-4 right-4 sm:bottom-10 sm:right-10 z-[70] flex flex-col items-end gap-3">
         {showHistory && (
-          <div className="glass-panel w-[calc(100vw-2rem)] sm:w-80 max-h-[50vh] sm:max-h-[60vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-300 border-slate-200">
+          <div className="glass-panel w-[calc(100vw-2rem)] sm:w-80 max-h-[60vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-300 border-slate-200">
             <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white/50">
               <h3 className="text-[10px] font-black uppercase tracking-widest ai-title-text premium-font flex items-center gap-2">
                 <History className="w-4 h-4 text-amber-500" /> Session Logs

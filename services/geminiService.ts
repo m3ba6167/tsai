@@ -6,7 +6,8 @@ export const getGeminiResponse = async (
   type: ToolType, 
   grade: string, 
   personality: PersonalityType,
-  onChunk: (text: string) => void
+  onChunk: (text: string) => void,
+  fileData?: { data: string; mimeType: string }
 ) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   // Using gemini-3-flash-preview for the optimal balance of elite speed and high-fidelity intelligence
@@ -23,17 +24,24 @@ export const getGeminiResponse = async (
     case PersonalityType.STRICT:
       personalityInstruction = "Persona: Senior Technical Analyst. Be precise, concise, and professional. Deliver direct, high-fidelity responses with maximum accuracy and zero redundancy.";
       break;
+    case PersonalityType.SOCRATIC:
+      personalityInstruction = "Persona: Socratic Tutor. DO NOT give the answer immediately. Instead, guide the student to find it by asking leading questions. Break down the problem into smaller steps and ask the student what the next logical move should be. Support academic integrity and genuine learning.";
+      break;
   }
 
   const premiumPrefix = `PROTOCOL ACTIVE: You are TSAI, the world's most sophisticated intelligence interface. ${personalityInstruction} Your output must be elegant, professional, and accurate, reflecting an elite user experience. `;
 
   let systemInstruction = "";
+  let responseMimeType = "text/plain";
 
   if (type === ToolType.MATH) {
+    const socraticRule = personality === PersonalityType.SOCRATIC 
+      ? "MISSION: Guide the student through the problem using Socratic questioning. DO NOT provide the final answer yet. Ask the student for the next step."
+      : "MISSION: Provide clear, rigorous mathematical solutions. Use professional Markdown formatting. REQUIREMENT: Conclude precisely with 'Final Answer: [result]'.";
+
     systemInstruction = premiumPrefix + `MODULE: Math Solver Core. 
     - Target Academic Level: ${grade}.
-    - MISSION: Provide clear, rigorous mathematical solutions. Use professional Markdown formatting.
-    - REQUIREMENT: Conclude precisely with "Final Answer: [result]".
+    - ${socraticRule}
     - Leverage LaTeX-style formulas where applicable.`;
   } else if (type === ToolType.FACT) {
     systemInstruction = premiumPrefix + `MODULE: Curiosity Archive.
@@ -69,15 +77,59 @@ export const getGeminiResponse = async (
       # [Directive Title]
       "[The Quote/Advice]"
       - [Strategic Commentary]`;
+  } else if (type === ToolType.STUDY) {
+    responseMimeType = "application/json";
+    systemInstruction = premiumPrefix + `MODULE: Multi-Modal Study Set Architect.
+    - MISSION: Transform the provided materials (text or image of notes) into a high-fidelity interactive study set.
+    - OUTPUT REQUIREMENTS (JSON Format):
+      {
+        "summary": "A simplified summary written at a 5th-grade level to check base understanding.",
+        "flashcards": [
+          { "front": "Question/Concept", "back": "Answer/Explanation" }
+        ],
+        "quiz": [
+          { "question": "Tricky question based on the text", "options": ["A", "B", "C", "D"], "answer": "Correct Option", "explanation": "Why it's correct" }
+        ]
+      }
+    - STRATEGY: Focus on the most complex or 'trickiest' parts for the quiz. Ensure flashcards follow active recall principles.`;
+  } else if (type === ToolType.VOICE_CONCEPT) {
+    systemInstruction = premiumPrefix + `MODULE: Voice Architect & Concept Mapper.
+    - MISSION: Transform raw, spoken "ramblings" or unstructured thoughts into a high-fidelity, structured essay outline or a visual-ready mind map.
+    - FORMAT: 
+      # [Concept Title]
+      ## 🗺️ Strategic Mind Map
+      - [Core Node]
+        - [Sub-node 1]
+        - [Sub-node 2]
+      
+      ## 📝 Structured Outline
+      I. [Introduction/Thesis]
+      II. [Key Argument 1]
+      III. [Key Argument 2]
+      IV. [Conclusion]
+    - TONE: Professional, analytical, and highly organized.`;
   }
 
   try {
+    const contents: any[] = [];
+    if (fileData) {
+      contents.push({
+        parts: [
+          { inlineData: { data: fileData.data, mimeType: fileData.mimeType } },
+          { text: query || "Analyze these materials and generate a study set." }
+        ]
+      });
+    } else {
+      contents.push({ parts: [{ text: query || "Awaiting priority request." }] });
+    }
+
     const result = await ai.models.generateContentStream({
       model,
-      contents: query || "Awaiting priority request.",
+      contents,
       config: {
         systemInstruction,
-        thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for maximum raw speed
+        responseMimeType,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 

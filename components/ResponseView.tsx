@@ -1,5 +1,6 @@
 import React from 'react';
 import { Volume2, Square } from 'lucide-react';
+import Markdown from 'react-markdown';
 
 interface ResponseViewProps {
   content: string;
@@ -57,12 +58,8 @@ const ResponseView: React.FC<ResponseViewProps> = ({
         </div>
       )}
 
-      <div className="prose prose-slate prose-sm sm:prose-base lg:prose-lg max-w-none text-slate-700 font-medium overflow-wrap-break-word">
-        {content.split('\n').map((line, i) => (
-          <p key={i} className={`mb-3 sm:mb-6 last:mb-0 leading-relaxed ${line.startsWith('#') || line.toLowerCase().includes('final answer') ? 'ai-title-text font-black text-lg sm:text-2xl' : ''}`}>
-            {line}
-          </p>
-        ))}
+      <div className="markdown-body prose prose-slate prose-sm sm:prose-base lg:prose-lg max-w-none text-slate-700 font-medium overflow-wrap-break-word prose-headings:ai-title-text prose-headings:font-black prose-headings:tracking-tighter prose-p:leading-relaxed prose-li:leading-relaxed prose-strong:text-amber-600">
+        <Markdown>{content}</Markdown>
       </div>
       
       {sources && sources.length > 0 && (

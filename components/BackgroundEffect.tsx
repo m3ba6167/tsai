@@ -19,12 +19,13 @@ const BackgroundEffect: React.FC<{ density?: number }> = ({ density = 60 }) => {
       <style>
         {`
           @keyframes subtleSnow {
-            0% { transform: translateY(-10vh) translateX(0) rotate(0deg); }
-            50% { transform: translateY(50vh) translateX(var(--drift)) rotate(180deg); }
-            100% { transform: translateY(110vh) translateX(0) rotate(360deg); }
+            0% { transform: translate3d(0, -10vh, 0) rotate(0deg); }
+            50% { transform: translate3d(var(--drift), 50vh, 0) rotate(180deg); }
+            100% { transform: translate3d(0, 110vh, 0) rotate(360deg); }
           }
           .animate-snow {
             animation: subtleSnow linear infinite;
+            will-change: transform;
           }
         `}
       </style>

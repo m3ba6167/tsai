@@ -5,19 +5,23 @@ export enum ToolType {
   WORD = 'WORD',
   SCIENCE = 'SCIENCE LAB',
   CODING = 'CODE ASTRO',
-  MOTIVATION = 'MOTIVATION'
+  MOTIVATION = 'MOTIVATION',
+  STUDY = 'STUDY GEN',
+  VOICE_CONCEPT = 'VOICE ARCHITECT'
 }
 
 export enum ViewState {
   AUTH = 'AUTH',
   HOME = 'HOME',
-  TOOL = 'TOOL'
+  TOOL = 'TOOL',
+  TALES = 'TALES'
 }
 
 export enum PersonalityType {
   TEACHER = 'Teacher Mode',
   BUDDY = 'Friendly Buddy',
-  STRICT = 'Strict Mode'
+  STRICT = 'Strict Mode',
+  SOCRATIC = 'Socratic Tutor'
 }
 
 export interface HistoryItem {
