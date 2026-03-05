@@ -68,6 +68,7 @@ const PERSONALITIES = Object.values(PersonalityType);
 
 const FORBIDDEN_WORDS = ['badword1', 'badword2', 'idiot', 'stupid', 'fuck', 'shit', 'asshole', 'bitch', 'dumb'];
 const ADMIN_EMAIL = 'kanimation641@gmail.com';
+const DUMB_EMAILS = ['dumb@gmail.com', 'test@gmail.com', 'admin@gmail.com', 'stupid@gmail.com', 'idiot@gmail.com'];
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>(ViewState.AUTH);
@@ -280,6 +281,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkBan = () => {
       const now = Date.now();
+      // Admin bypass: never be banned
+      if (userEmail === ADMIN_EMAIL) {
+        setIsBanned(false);
+        setBanTimeRemaining(0);
+        return;
+      }
+
       if (banUntil > now) {
         setIsBanned(true);
         setBanTimeRemaining(Math.ceil((banUntil - now) / 1000));
@@ -291,7 +299,7 @@ const App: React.FC = () => {
     checkBan();
     const interval = setInterval(checkBan, 1000);
     return () => clearInterval(interval);
-  }, [banUntil]);
+  }, [banUntil, userEmail]);
 
   useEffect(() => {
     if (!examDate) return;
@@ -363,6 +371,10 @@ const App: React.FC = () => {
     }
     if (!gmailRegex.test(email)) {
       setEmailError('Gmail Identity required');
+      return;
+    }
+    if (DUMB_EMAILS.includes(email.toLowerCase()) || email.toLowerCase().includes('test') || email.toLowerCase().includes('example')) {
+      setEmailError('Invalid identity detected');
       return;
     }
     setAuthLoading(true);
