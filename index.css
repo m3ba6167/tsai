@@ -54,6 +54,40 @@
     color: #333333 !important;
   }
 
+  body.st-patrick-mode {
+    background-color: #0a2e1a !important;
+    color: #ffffff !important;
+  }
+
+  body.st-patrick-mode .glass-panel {
+    background: rgba(10, 46, 26, 0.8) !important;
+    border: 1px solid rgba(34, 197, 94, 0.3) !important;
+    color: #ffffff !important;
+  }
+
+  body.st-patrick-mode .ai-title-text {
+    background: linear-gradient(135deg, #22c55e, #fbbf24, #22c55e) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+  }
+
+  body.st-patrick-mode .text-slate-600,
+  body.st-patrick-mode .text-slate-400,
+  body.st-patrick-mode .text-slate-800 {
+    color: #d1fae5 !important;
+  }
+
+  body.st-patrick-mode .premium-button-gold {
+    background: linear-gradient(135deg, #166534, #22c55e) !important;
+    border: 1px solid rgba(34, 197, 94, 0.5) !important;
+  }
+
+  body.st-patrick-mode .premium-button-silver {
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  }
+
   body {
     @apply antialiased text-slate-600 bg-white min-h-screen;
     min-height: -webkit-fill-available;

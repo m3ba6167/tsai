@@ -7,13 +7,15 @@ export const getGeminiResponse = async (
   grade: string, 
   personality: PersonalityType,
   onChunk: (text: string) => void,
-  fileData?: { data: string; mimeType: string }
+  fileData?: { data: string; mimeType: string },
+  isPremium: boolean = false
 ) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  // Using gemini-3-flash-preview for the optimal balance of elite speed and high-fidelity intelligence
-  const model = "gemini-3-flash-preview";
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY });
+  // Premium users get the more powerful Pro model, others get Flash
+  const model = isPremium ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
   
   let personalityInstruction = "";
+  // ... (rest of personality switch remains the same)
   switch (personality) {
     case PersonalityType.TEACHER:
       personalityInstruction = "Persona: Master Academic Mentor. Be patient, highly structured, and encouraging. Deliver complex concepts with elite clarity and professional rigor.";
@@ -27,9 +29,19 @@ export const getGeminiResponse = async (
     case PersonalityType.SOCRATIC:
       personalityInstruction = "Persona: Socratic Tutor. DO NOT give the answer immediately. Instead, guide the student to find it by asking leading questions. Break down the problem into smaller steps and ask the student what the next logical move should be. Support academic integrity and genuine learning.";
       break;
+    case PersonalityType.LEPRECHAUN:
+      personalityInstruction = "Persona: Lucky Leprechaun. Be mischievous, cheerful, and full of Irish charm. Use phrases like 'Happy St. Patrick's Day!', 'Feeling lucky today?', 'Top o' the mornin'', 'Faith and Begorra', and 'Luck of the Irish'. Mention pots of gold, rainbows, and four-leaf clovers. Keep the academic quality high but delivered with a playful, magical twist.";
+      break;
   }
 
-  const premiumPrefix = `PROTOCOL ACTIVE: You are TSAI, the world's most sophisticated intelligence interface. ${personalityInstruction} Your output must be elegant, professional, and accurate, reflecting an elite user experience. `;
+  const premiumStatus = isPremium 
+    ? "PREMIUM PROTOCOL ACTIVE: You are operating in ELITE MODE. Provide maximum depth, advanced reasoning, and exhaustive detail. Use sophisticated vocabulary and complex structural analysis."
+    : "STANDARD PROTOCOL: Provide clear, efficient, and accurate responses.";
+
+  const isStPatricksUpdate = true;
+  const stPatricksTwist = "SPECIAL DIRECTIVE: It is St. Patrick's Day season. Infuse your response with a touch of Irish luck and festive cheer. Mention a 'Lucky Fact' or a 'Clover Tip' if appropriate. ";
+
+  const premiumPrefix = `PROTOCOL ACTIVE: You are TSAI, the world's most sophisticated intelligence interface. ${premiumStatus} ${personalityInstruction} ${stPatricksTwist} Your output must be elegant, professional, and accurate, reflecting an elite user experience. `;
 
   let systemInstruction = "";
   let responseMimeType = "text/plain";
@@ -129,7 +141,6 @@ export const getGeminiResponse = async (
       config: {
         systemInstruction,
         responseMimeType,
-        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
