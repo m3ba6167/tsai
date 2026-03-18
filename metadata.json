@@ -1,6 +1,6 @@
 {
   "name": "TSAI: The smartest ai",
-  "description": "TSAI",
+  "description": "A high-stakes pet collection and luck-based game with global leaderboards, admin controls, and real-time announcements.",
   "requestFramePermissions": [
     "microphone"
   ]

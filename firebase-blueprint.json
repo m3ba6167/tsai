@@ -23,12 +23,32 @@
         }
       },
       "required": ["text", "sender", "timestamp", "active"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile and game state",
+      "type": "object",
+      "properties": {
+        "nickname": { "type": "string" },
+        "email": { "type": "string" },
+        "eggs": { "type": "number" },
+        "coins": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "isPremium": { "type": "boolean" },
+        "pets": { "type": "array", "items": { "type": "object" } },
+        "lastUpdate": { "type": "number" }
+      },
+      "required": ["nickname", "email", "eggs", "coins", "isVerified", "isPremium", "pets"]
     }
   },
   "firestore": {
     "/announcements/global": {
       "schema": "Announcement",
       "description": "The single global announcement document"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user profiles"
     }
   }
 }

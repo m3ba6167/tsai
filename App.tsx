@@ -12,6 +12,7 @@ import {
   LogIn, 
   Mail, 
   AlertCircle, 
+  AlertTriangle,
   User, 
   LogOut, 
   Sparkles, 
@@ -72,8 +73,27 @@ import Shop from './components/Shop.tsx';
 import StatsBar from './components/StatsBar.tsx';
 import ToolGrid from './components/ToolGrid.tsx';
 import { getGeminiResponse } from './services/geminiService.ts';
-import { db } from './firebase';
-import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { db, auth } from './firebase';
+import { 
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc,
+  serverTimestamp,
+  orderBy,
+  limit
+} from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged,
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
 import { ToolType, HistoryItem, ViewState, PersonalityType, Pet, PetType, LeaderboardEntry } from './types.ts';
 
 const GRADES = [
@@ -100,6 +120,7 @@ const App: React.FC = () => {
   
   const [email, setEmail] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
   const [emailError, setEmailError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   
@@ -175,7 +196,10 @@ const App: React.FC = () => {
   const [adminKeepOpen, setAdminKeepOpen] = useState(false);
   const [adminCommandInput, setAdminCommandInput] = useState('');
   const [announcement, setAnnouncement] = useState(() => localStorage.getItem('tsai-announcement') || '');
+  const [announcementSender, setAnnouncementSender] = useState('');
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const lastSyncedState = useRef<string>('');
   const [customAdminCommands, setCustomAdminCommands] = useState<{label: string, cmd: string}[]>(() => {
     const saved = localStorage.getItem('tsai-custom-admin-cmds');
     return saved ? JSON.parse(saved) : [];
@@ -217,14 +241,156 @@ const App: React.FC = () => {
         const data = docSnap.data();
         if (data.active) {
           setAnnouncement(data.text);
+          setAnnouncementSender(data.sender || 'System');
           setIsAnnouncementModalOpen(true);
         } else {
           setAnnouncement('');
+          setAnnouncementSender('');
           setIsAnnouncementModalOpen(false);
         }
       }
     });
     return () => unsub();
+  }, []);
+
+  // Firebase Auth & User Data Sync
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserId(user.uid);
+        setUserEmail(user.email || '');
+        if (user.displayName && !nickname) setNickname(user.displayName);
+        if (user.photoURL && !profilePic) setProfilePic(user.photoURL);
+        setView(ViewState.HOME);
+      } else {
+        setUserId(null);
+        setUserEmail('');
+        setView(ViewState.AUTH);
+      }
+    });
+    return () => unsubAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const unsubUser = onSnapshot(doc(db, 'users', userId), (docSnap) => {
+      // Skip updates from local writes to prevent loops
+      if (docSnap.metadata.hasPendingWrites) return;
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // Only update if data is different to avoid unnecessary re-renders/syncs
+        setEggs(prev => prev !== (data.eggs ?? 0) ? (data.eggs ?? 0) : prev);
+        setCoins(prev => prev !== (data.coins ?? 0) ? (data.coins ?? 0) : prev);
+        setPets(prev => JSON.stringify(prev) !== JSON.stringify(data.pets ?? []) ? (data.pets ?? []) : prev);
+        setIsVerified(prev => prev !== (data.isVerified ?? false) ? (data.isVerified ?? false) : prev);
+        setIsPremium(prev => prev !== (data.isPremium ?? false) ? (data.isPremium ?? false) : prev);
+        setIsBanned(prev => prev !== (data.isBanned ?? false) ? (data.isBanned ?? false) : prev);
+        if (data.nickname) setNickname(prev => prev !== data.nickname ? data.nickname : prev);
+        if (data.profilePic) setProfilePic(prev => prev !== data.profilePic ? data.profilePic : prev);
+      } else {
+        // Initialize user document
+        const currentUser = auth.currentUser;
+        setDoc(doc(db, 'users', userId), {
+          nickname: nickname || currentUser?.displayName || getUsername(userEmail),
+          email: userEmail,
+          eggs: eggs,
+          coins: coins,
+          pets: pets,
+          isVerified: userEmail === ADMIN_EMAIL,
+          isPremium: isPremium,
+          isBanned: false,
+          profilePic: profilePic || currentUser?.photoURL || '',
+          lastUpdate: Date.now()
+        });
+      }
+    });
+
+    return () => unsubUser();
+  }, [userId]);
+
+  // Global Announcement Sync
+  useEffect(() => {
+    const unsubAnnouncement = onSnapshot(doc(db, 'announcements', 'global'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setAnnouncement(data.text || '');
+        setAnnouncementSender(data.sender || 'System');
+        if (data.text) {
+          setIsAnnouncementModalOpen(true);
+        }
+      }
+    });
+    return () => unsubAnnouncement();
+  }, []);
+
+  // Sync local changes to Firestore (Debounced to save quota)
+  useEffect(() => {
+    if (!userId || isBanned) return;
+
+    const currentState = JSON.stringify({
+      eggs,
+      coins,
+      pets,
+      isVerified,
+      isPremium,
+      isBanned,
+      nickname,
+      profilePic
+    });
+
+    // Only sync if state has actually changed from last sync
+    if (currentState === lastSyncedState.current) return;
+
+    const timer = setTimeout(() => {
+      updateDoc(doc(db, 'users', userId), {
+        eggs,
+        coins,
+        pets,
+        isVerified,
+        isPremium,
+        isBanned,
+        nickname,
+        profilePic,
+        lastUpdate: Date.now()
+      })
+      .then(() => {
+        lastSyncedState.current = currentState;
+        setQuotaExceeded(false);
+      })
+      .catch(err => {
+        console.error("Sync Error:", err);
+        if (err.code === 'resource-exhausted') {
+          setQuotaExceeded(true);
+        }
+      });
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [eggs, coins, pets, isVerified, isPremium, isBanned, nickname, profilePic, userId]);
+
+  // Global Leaderboard Sync
+  useEffect(() => {
+    const q = query(collection(db, 'users'), orderBy('coins', 'desc'), limit(50));
+    const unsubLeaderboard = onSnapshot(q, (snapshot) => {
+      const entries: LeaderboardEntry[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          username: data.nickname || getUsername(data.email),
+          eggs: data.eggs || 0,
+          petsCount: (data.pets || []).length,
+          rareItems: (data.pets || []).filter((p: any) => p.rarity === 'Legendary' || p.rarity === 'Epic').map((p: any) => p.name),
+          score: (data.pets || []).length * 100 + (data.pets || []).filter((p: any) => p.rarity === 'Legendary' || p.rarity === 'Epic').length * 500 + (data.coins || 0),
+          coins: data.coins || 0,
+          isPremium: data.isPremium || false,
+          isVerified: data.isVerified || false
+        };
+      });
+      setLeaderboard(entries);
+    });
+    return () => unsubLeaderboard();
   }, []);
 
   useEffect(() => {
@@ -628,6 +794,12 @@ const App: React.FC = () => {
         return;
       }
 
+      // If banned via Firestore (permanent/admin ban)
+      if (isBanned) {
+        setBanTimeRemaining(9999); // Visual indicator for permanent
+        return;
+      }
+
       if (banUntil > now) {
         setIsBanned(true);
         setBanTimeRemaining(Math.ceil((banUntil - now) / 1000));
@@ -713,39 +885,30 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleLogin = (e?: React.FormEvent) => {
+  const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    setEmailError('');
-    const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
-    if (!email.trim()) {
-      setEmailError('Identity verification required');
-      return;
-    }
-    if (!gmailRegex.test(email)) {
-      setEmailError('Gmail Identity required');
-      return;
-    }
-    if (email && (DUMB_EMAILS.includes(email.toLowerCase()) || email.toLowerCase().includes('test') || email.toLowerCase().includes('example'))) {
-      setEmailError('Invalid identity detected');
-      return;
-    }
     setAuthLoading(true);
-    setTimeout(() => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Auth Error:", error);
+      setEmailError('Authentication failed. Please try again.');
+    } finally {
       setAuthLoading(false);
-      setUserEmail(email);
-      localStorage.setItem('tsai-nickname', nickname);
-      localStorage.setItem('tsai-profile-pic', profilePic);
-      setView(ViewState.HOME);
-      fetchWordOfDay();
-      fetchMotivation();
-    }, 1000);
+    }
   };
 
-  const handleLogout = () => {
-    setUserEmail('');
-    setEmail('');
-    setView(ViewState.AUTH);
-    window.speechSynthesis.cancel();
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUserId(null);
+      setUserEmail('');
+      setView(ViewState.AUTH);
+      window.speechSynthesis.cancel();
+    } catch (error) {
+      console.error("Logout Error:", error);
+    }
   };
 
   const handleGradeChange = (newGrade: string) => {
@@ -853,11 +1016,9 @@ const App: React.FC = () => {
         let item = '';
 
         if (parts.length === 3) {
-          // /give [amount] [item]
           amount = parseInt(parts[1]);
           item = parts[2].toLowerCase();
         } else if (parts.length >= 4) {
-          // /give [target] [amount] [item]
           target = parts[1];
           amount = parseInt(parts[2]);
           item = parts[3].toLowerCase();
@@ -876,20 +1037,22 @@ const App: React.FC = () => {
             }
             setLuckyMessage(`🎁 Admin: ${isGive ? 'Added' : 'Removed'} ${amount} ${item} ${isGive ? 'to' : 'from'} your stash!`);
           } else {
-            // Target someone else in the leaderboard
-            setLeaderboard(prev => prev.map(entry => {
-              if (entry.username === target || entry.id === target) {
+            // Target someone else in Firestore
+            const q = query(collection(db, 'users'), where('nickname', '==', target));
+            getDocs(q).then(snapshot => {
+              if (!snapshot.empty) {
+                const userDoc = snapshot.docs[0];
+                const data = userDoc.data();
                 if (isEgg) {
-                  const newEggs = Math.max(0, entry.eggs + change);
-                  return { ...entry, eggs: newEggs, score: newEggs * 10 + entry.petsCount * 100 + (entry.coins || 0) };
+                  updateDoc(userDoc.ref, { eggs: Math.max(0, (data.eggs || 0) + change) });
                 } else {
-                  const newCoins = Math.max(0, (entry.coins || 0) + change);
-                  return { ...entry, coins: newCoins, score: entry.eggs * 10 + entry.petsCount * 100 + newCoins };
+                  updateDoc(userDoc.ref, { coins: Math.max(0, (data.coins || 0) + change) });
                 }
+                setLuckyMessage(`🎁 Admin: ${isGive ? 'Added' : 'Removed'} ${amount} ${item} to ${target}'s account!`);
+              } else {
+                setLuckyMessage(`❌ Admin: User "${target}" not found.`);
               }
-              return entry;
-            }));
-            setLuckyMessage(`🎁 Admin: ${isGive ? 'Added' : 'Removed'} ${amount} ${item} ${isGive ? 'to' : 'from'} ${target}'s stash!`);
+            });
           }
           
           setTimeout(() => setLuckyMessage(''), 5000);
@@ -898,6 +1061,37 @@ const App: React.FC = () => {
           if (!adminKeepOpen) setIsAdminPanelOpen(false);
           return;
         }
+      }
+
+      // /announcement [message]
+      if (command === '/announcement' && parts.length >= 2) {
+        const msg = parts.slice(1).join(' ');
+        setDoc(doc(db, 'announcements', 'global'), {
+          text: msg,
+          sender: nickname || getUsername(userEmail),
+          timestamp: serverTimestamp(),
+          active: true
+        });
+        setLuckyMessage(`📢 Admin: Announcement sent to everyone!`);
+        setTimeout(() => setLuckyMessage(''), 5000);
+        setAdminCommandInput('');
+        if (!adminKeepOpen) setIsAdminPanelOpen(false);
+        return;
+      }
+
+      // /clearannouncement
+      if (command === '/clearannouncement') {
+        setDoc(doc(db, 'announcements', 'global'), {
+          text: '',
+          sender: '',
+          timestamp: serverTimestamp(),
+          active: false
+        });
+        setLuckyMessage(`📢 Admin: Announcement cleared.`);
+        setTimeout(() => setLuckyMessage(''), 5000);
+        setAdminCommandInput('');
+        if (!adminKeepOpen) setIsAdminPanelOpen(false);
+        return;
       }
 
       // /reseteggs
@@ -927,13 +1121,15 @@ const App: React.FC = () => {
       // /ban [nickname]
       if (command === '/ban' && parts.length >= 2) {
         const target = parts[1];
-        setLeaderboard(prev => prev.map(entry => {
-          if (entry.username === target || entry.id === target) {
-            return { ...entry, isBanned: true };
+        const q = query(collection(db, 'users'), where('nickname', '==', target));
+        getDocs(q).then(snapshot => {
+          if (!snapshot.empty) {
+            updateDoc(snapshot.docs[0].ref, { isBanned: true });
+            setLuckyMessage(`🚫 Admin: Banned ${target}`);
+          } else {
+            setLuckyMessage(`❌ Admin: User "${target}" not found.`);
           }
-          return entry;
-        }));
-        setLuckyMessage(`🚫 Admin: Banned ${target}`);
+        });
         setTimeout(() => setLuckyMessage(''), 5000);
         setInput('');
         setAdminCommandInput('');
@@ -944,13 +1140,15 @@ const App: React.FC = () => {
       // /unban [nickname]
       if (command === '/unban' && parts.length >= 2) {
         const target = parts[1];
-        setLeaderboard(prev => prev.map(entry => {
-          if (entry.username === target || entry.id === target) {
-            return { ...entry, isBanned: false };
+        const q = query(collection(db, 'users'), where('nickname', '==', target));
+        getDocs(q).then(snapshot => {
+          if (!snapshot.empty) {
+            updateDoc(snapshot.docs[0].ref, { isBanned: false });
+            setLuckyMessage(`✅ Admin: Unbanned ${target}`);
+          } else {
+            setLuckyMessage(`❌ Admin: User "${target}" not found.`);
           }
-          return entry;
-        }));
-        setLuckyMessage(`✅ Admin: Unbanned ${target}`);
+        });
         setTimeout(() => setLuckyMessage(''), 5000);
         setInput('');
         setAdminCommandInput('');
@@ -965,13 +1163,15 @@ const App: React.FC = () => {
           setIsVerified(true);
           setLuckyMessage(`✅ Admin: You are now VERIFIED!`);
         } else {
-          setLeaderboard(prev => prev.map(entry => {
-            if (entry.username === target || entry.id === target) {
-              return { ...entry, isVerified: true };
+          const q = query(collection(db, 'users'), where('nickname', '==', target));
+          getDocs(q).then(snapshot => {
+            if (!snapshot.empty) {
+              updateDoc(snapshot.docs[0].ref, { isVerified: true });
+              setLuckyMessage(`✅ Admin: Verified ${target}`);
+            } else {
+              setLuckyMessage(`❌ Admin: User "${target}" not found.`);
             }
-            return entry;
-          }));
-          setLuckyMessage(`✅ Admin: Verified ${target}`);
+          });
         }
         setTimeout(() => setLuckyMessage(''), 5000);
         setInput('');
@@ -987,13 +1187,15 @@ const App: React.FC = () => {
           setIsVerified(false);
           setLuckyMessage(`✅ Admin: Your verification has been removed.`);
         } else {
-          setLeaderboard(prev => prev.map(entry => {
-            if (entry.username === target || entry.id === target) {
-              return { ...entry, isVerified: false };
+          const q = query(collection(db, 'users'), where('nickname', '==', target));
+          getDocs(q).then(snapshot => {
+            if (!snapshot.empty) {
+              updateDoc(snapshot.docs[0].ref, { isVerified: false });
+              setLuckyMessage(`✅ Admin: Unverified ${target}`);
+            } else {
+              setLuckyMessage(`❌ Admin: User "${target}" not found.`);
             }
-            return entry;
-          }));
-          setLuckyMessage(`✅ Admin: Unverified ${target}`);
+          });
         }
         setTimeout(() => setLuckyMessage(''), 5000);
         setInput('');
@@ -1215,54 +1417,33 @@ const App: React.FC = () => {
             <div className="absolute -top-6 sm:-top-10 left-1/2 -translate-x-1/2 bg-white p-3 sm:p-4 rounded-full shadow-lg border border-slate-200"><Diamond className="w-6 h-6 text-amber-500" /></div>
             <h1 className="text-5xl sm:text-8xl ai-title-text premium-font mb-1 sm:mb-2 mt-4 sm:mt-6">TSAI</h1>
             <p className="text-slate-400 text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em] mb-6 sm:mb-10">Premium Intelligence Gateway</p>
-            <form onSubmit={handleLogin} className="space-y-4">
+            
+            <div className="space-y-6">
               <div className="relative group text-left">
                 <label className="block text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 ml-4">Elite Identity</label>
-                <div className={`flex items-center bg-white border ${emailError ? 'border-red-500' : 'border-slate-200'} p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl transition-all focus-within:ring-4 focus-within:ring-amber-50`}>
-                  <Mail className={`w-4 h-4 sm:w-5 h-5 mr-3 ${emailError ? 'text-red-400' : 'text-slate-300'}`} />
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@gmail.com" className="bg-transparent w-full text-sm font-medium text-slate-900 outline-none" autoFocus />
-                </div>
+                <button 
+                  onClick={handleLogin} 
+                  disabled={authLoading}
+                  className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 p-4 rounded-3xl hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                >
+                  {authLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
+                  ) : (
+                    <>
+                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                      <span className="text-sm font-bold text-slate-700">Continue with Google</span>
+                    </>
+                  )}
+                </button>
                 {emailError && <div className="flex items-center gap-1.5 mt-2 ml-4 text-red-400 text-[9px] font-bold uppercase">{emailError}</div>}
               </div>
 
-              <div className="relative group text-left">
-                <label className="block text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 ml-4">Nickname</label>
-                <div className="flex items-center bg-white border border-slate-200 p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl transition-all focus-within:ring-4 focus-within:ring-amber-50">
-                  <User className="w-4 h-4 sm:w-5 h-5 mr-3 text-slate-300" />
-                  <input type="text" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="Your Nickname" className="bg-transparent w-full text-sm font-medium text-slate-900 outline-none" />
-                </div>
+              <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-widest leading-relaxed">
+                  Authentication is required to sync your progress, pets, and global rank across all devices.
+                </p>
               </div>
-
-              <div className="relative group text-left">
-                <label className="block text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 ml-4">Profile Picture</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center overflow-hidden relative group/avatar">
-                    {profilePic ? (
-                      <img src={profilePic} alt="Preview" className="w-full h-full object-cover" />
-                    ) : (
-                      <Camera className="w-6 h-6 text-slate-300" />
-                    )}
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      onChange={handleProfilePicUpload}
-                      className="absolute inset-0 opacity-0 cursor-pointer z-10"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
-                      <FileUp className="w-5 h-5 text-white" />
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-tight">Click to upload avatar</p>
-                    <p className="text-[7px] text-slate-300 uppercase tracking-widest mt-1">Supports PNG, JPG</p>
-                  </div>
-                </div>
-              </div>
-
-              <button type="submit" disabled={authLoading} className="w-full premium-button-gold p-4 sm:p-5 rounded-2xl sm:rounded-3xl font-bold transition-all active:scale-95 disabled:opacity-50 mt-2 text-sm sm:text-base">
-                {authLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Initialize Connection"}
-              </button>
-            </form>
+            </div>
           </div>
         </div>
       </div>
@@ -1273,6 +1454,21 @@ const App: React.FC = () => {
     <div className={`min-h-screen relative flex flex-col text-slate-600 antialiased overflow-x-hidden ${isStPatricksMode ? 'bg-[#0a2e1a]' : 'silver-white-bg'}`}>
       <BackgroundEffect density={50} theme={isStPatricksMode ? 'st-patrick' : 'default'} />
       
+      <AnimatePresence>
+        {quotaExceeded && (
+          <motion.div 
+            initial={{ y: -100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -100, opacity: 0 }}
+            className="fixed top-0 left-0 right-0 z-[1000] bg-amber-500 text-white p-3 text-center font-black uppercase tracking-widest text-[10px] shadow-2xl flex items-center justify-center gap-3"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            <span>Daily Sync Quota Reached. Progress will save locally until reset (00:00 UTC).</span>
+            <button onClick={() => setQuotaExceeded(false)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity"><X className="w-4 h-4" /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isHatching && (
           <motion.div 
@@ -2358,7 +2554,7 @@ const App: React.FC = () => {
 
               <p className="text-2xl font-bold text-white leading-relaxed mb-10">
                 <span className="inline-flex items-center gap-2 mr-3 align-middle">
-                  <span className="text-amber-500 font-black uppercase tracking-widest text-lg">{nickname || getUsername(userEmail)}</span>
+                  <span className="text-amber-500 font-black uppercase tracking-widest text-lg">{announcementSender}</span>
                   <BadgeCheck className="w-6 h-6 text-[#0095f6] fill-white" />
                   <span className="text-slate-400 font-bold text-lg">:</span>
                 </span>
@@ -2394,7 +2590,7 @@ const App: React.FC = () => {
               </div>
               <div className="text-left overflow-hidden">
                 <div className="flex items-center gap-1.5 mb-0.5">
-                  <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest">{nickname || getUsername(userEmail)}</p>
+                  <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest">{announcementSender}</p>
                   <BadgeCheck className="w-3 h-3 text-[#0095f6] fill-white" />
                 </div>
                 <p className="text-xs font-bold text-white truncate w-40">{announcement}</p>
