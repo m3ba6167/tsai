@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Pet, PetType } from '../types';
-import { Dog, Star, Clover, Rainbow, Trophy, Sparkles, ArrowLeft, Zap, Coins, Trash2 } from 'lucide-react';
+import { Dog, Star, Trophy, Sparkles, ArrowLeft, Zap, Coins, Trash2 } from 'lucide-react';
 
 interface PetDisplayProps {
   pets: Pet[];
@@ -19,10 +19,6 @@ interface PetDisplayProps {
 const PetDisplay: React.FC<PetDisplayProps> = ({ pets, eggs, coins, pendingCoins, isHatching, onHatchAll, onBack, onDeletePet, onDeleteAllPets, onCollect }) => {
   const getPetIcon = (type: PetType) => {
     switch (type) {
-      case PetType.LUCKY_CLOVER: return <Clover className="w-8 h-8 text-green-400" />;
-      case PetType.RAINBOW: return <Rainbow className="w-8 h-8 text-blue-400" />;
-      case PetType.POT_OF_GOLD: return <Coins className="w-8 h-8 text-yellow-400" />;
-      case PetType.LEPRECHAUN: return <Sparkles className="w-8 h-8 text-green-600" />;
       case PetType.LUCKY_STAR: return <Star className="w-8 h-8 text-amber-400" />;
       default: return <Dog className="w-8 h-8 text-slate-400" />;
     }
@@ -30,10 +26,6 @@ const PetDisplay: React.FC<PetDisplayProps> = ({ pets, eggs, coins, pendingCoins
 
   const getPetColor = (type: PetType) => {
     switch (type) {
-      case PetType.LUCKY_CLOVER: return 'from-green-500/20 to-green-900/40 border-green-500/30';
-      case PetType.RAINBOW: return 'from-blue-500/20 to-purple-900/40 border-blue-500/30';
-      case PetType.POT_OF_GOLD: return 'from-yellow-500/20 to-orange-900/40 border-yellow-500/30';
-      case PetType.LEPRECHAUN: return 'from-emerald-500/20 to-emerald-900/40 border-emerald-500/30';
       case PetType.LUCKY_STAR: return 'from-amber-500/20 to-amber-900/40 border-amber-500/30';
       default: return 'from-slate-500/20 to-slate-900/40 border-slate-500/30';
     }
@@ -64,8 +56,8 @@ const PetDisplay: React.FC<PetDisplayProps> = ({ pets, eggs, coins, pendingCoins
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
           <div className="flex items-center gap-3">
-            <Dog className="w-8 h-8 text-green-400" />
-            <h2 className="text-3xl sm:text-5xl font-black text-white premium-font">MY LUCKY DOGS</h2>
+            <Dog className="w-8 h-8 text-amber-400" />
+            <h2 className="text-3xl sm:text-5xl font-black text-white premium-font">MY PETS</h2>
           </div>
         </div>
 
@@ -111,8 +103,8 @@ const PetDisplay: React.FC<PetDisplayProps> = ({ pets, eggs, coins, pendingCoins
       {pets.length === 0 ? (
         <div className="glass-panel p-20 rounded-[3rem] text-center space-y-6 border-2 border-dashed border-white/10">
           <Dog className="w-20 h-20 text-white/10 mx-auto animate-bounce" />
-          <p className="text-white/40 font-black premium-font text-xl">NO LUCKY DOGS YET...</p>
-          <p className="text-green-200/30 text-sm uppercase tracking-widest font-bold">Complete Clover Quests to find them!</p>
+          <p className="text-white/40 font-black premium-font text-xl">NO PETS YET...</p>
+          <p className="text-amber-200/30 text-sm uppercase tracking-widest font-bold">Hatch eggs to find them!</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

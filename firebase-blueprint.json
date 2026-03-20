@@ -29,16 +29,18 @@
       "description": "User profile and game state",
       "type": "object",
       "properties": {
-        "nickname": { "type": "string" },
-        "email": { "type": "string" },
-        "eggs": { "type": "number" },
-        "coins": { "type": "number" },
-        "isVerified": { "type": "boolean" },
-        "isPremium": { "type": "boolean" },
-        "pets": { "type": "array", "items": { "type": "object" } },
-        "lastUpdate": { "type": "number" }
+        "nickname": { "type": "string", "description": "User's display name" },
+        "email": { "type": "string", "description": "User's email address" },
+        "eggs": { "type": "number", "description": "Number of eggs owned" },
+        "coins": { "type": "number", "description": "Number of coins owned" },
+        "isVerified": { "type": "boolean", "description": "Whether the user is verified" },
+        "isPremium": { "type": "boolean", "description": "Whether the user has premium access" },
+        "isBanned": { "type": "boolean", "description": "Whether the user is banned" },
+        "pets": { "type": "array", "items": { "type": "object" }, "description": "List of pets owned" },
+        "profilePic": { "type": "string", "description": "URL to user's profile picture" },
+        "lastUpdate": { "type": "number", "description": "Last sync timestamp" }
       },
-      "required": ["nickname", "email", "eggs", "coins", "isVerified", "isPremium", "pets"]
+      "required": ["nickname", "email", "eggs", "coins", "isVerified", "isPremium", "isBanned", "pets", "lastUpdate"]
     }
   },
   "firestore": {

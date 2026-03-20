@@ -15,18 +15,12 @@ export enum ViewState {
   HOME = 'HOME',
   TOOL = 'TOOL',
   TALES = 'TALES',
-  CLOVER_QUEST = 'CLOVER_QUEST',
   BUGS = 'BUGS',
   LEADERBOARD = 'LEADERBOARD',
-  PETS = 'PETS',
-  SHOP = 'SHOP'
+  PETS = 'PETS'
 }
 
 export enum PetType {
-  LUCKY_CLOVER = 'LUCKY_CLOVER',
-  RAINBOW = 'RAINBOW',
-  POT_OF_GOLD = 'POT_OF_GOLD',
-  LEPRECHAUN = 'LEPRECHAUN',
   LUCKY_STAR = 'LUCKY_STAR'
 }
 
@@ -56,8 +50,7 @@ export enum PersonalityType {
   TEACHER = 'Teacher Mode',
   BUDDY = 'Friendly Buddy',
   STRICT = 'Strict Mode',
-  SOCRATIC = 'Socratic Tutor',
-  LEPRECHAUN = 'Lucky Leprechaun'
+  SOCRATIC = 'Socratic Tutor'
 }
 
 export interface HistoryItem {

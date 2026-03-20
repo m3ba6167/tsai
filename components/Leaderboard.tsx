@@ -1,15 +1,14 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { LeaderboardEntry } from '../types';
-import { Trophy, Medal, Star, Clover, Dog, ArrowLeft, Crown, Coins, ShoppingBag, BadgeCheck } from 'lucide-react';
+import { Trophy, Medal, Star, Clover, Dog, ArrowLeft, Crown, Coins, BadgeCheck } from 'lucide-react';
 
 interface LeaderboardProps {
   entries: LeaderboardEntry[];
   onBack: () => void;
-  onOpenShop?: () => void;
 }
 
-const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onBack, onOpenShop }) => {
+const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onBack }) => {
   const sortedEntries = [...entries].sort((a, b) => b.score - a.score);
 
   return (
@@ -109,23 +108,6 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onBack, onOpenShop }
           ))}
         </div>
       </div>
-
-      {onOpenShop && (
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={onOpenShop}
-          className="w-full py-6 bg-amber-500 hover:bg-amber-600 text-white rounded-[2rem] border border-amber-400 shadow-xl shadow-amber-500/20 flex items-center justify-center gap-4 group transition-all"
-        >
-          <div className="p-3 bg-white/20 rounded-2xl group-hover:rotate-12 transition-transform">
-            <ShoppingBag className="w-8 h-8" />
-          </div>
-          <div className="text-left">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Visit the Emporium</p>
-            <h3 className="text-2xl font-black premium-font uppercase">Open Shop</h3>
-          </div>
-        </motion.button>
-      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="glass-panel p-6 rounded-[2rem] border border-white/5 bg-white/5 text-center space-y-2">

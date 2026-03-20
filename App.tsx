@@ -51,13 +51,11 @@ import {
   Send,
   Volume2,
   Square,
-  Clover,
   Bug,
   Dog,
   Trophy,
   Zap,
   Camera,
-  ShoppingBag,
   Coins,
   Plus
 } from 'lucide-react';
@@ -65,11 +63,9 @@ import Markdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 import ResponseView from './components/ResponseView.tsx';
 import BackgroundEffect from './components/BackgroundEffect.tsx';
-import CloverQuest from './components/CloverQuest.tsx';
 import BugsPage from './components/BugsPage.tsx';
 import PetDisplay from './components/PetDisplay.tsx';
 import Leaderboard from './components/Leaderboard.tsx';
-import Shop from './components/Shop.tsx';
 import StatsBar from './components/StatsBar.tsx';
 import ToolGrid from './components/ToolGrid.tsx';
 import { getGeminiResponse } from './services/geminiService.ts';
@@ -88,13 +84,63 @@ import {
   limit
 } from 'firebase/firestore';
 import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
+  signInAnonymously,
   onAuthStateChanged,
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
 import { ToolType, HistoryItem, ViewState, PersonalityType, Pet, PetType, LeaderboardEntry } from './types.ts';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // We don't throw here to avoid crashing the whole app, but we log it clearly
+};
 
 const GRADES = [
   'Elementary (K-5)',
@@ -108,6 +154,7 @@ const PERSONALITIES = Object.values(PersonalityType);
 
 const FORBIDDEN_WORDS = ['badword1', 'badword2', 'idiot', 'stupid', 'fuck', 'shit', 'asshole', 'bitch', 'dumb'];
 const ADMIN_EMAIL = 'kanimation641@gmail.com';
+const ADMIN_NICKNAME = 'Admin_Kanimation_641';
 const DUMB_EMAILS = ['dumb@gmail.com', 'test@gmail.com', 'admin@gmail.com', 'stupid@gmail.com', 'idiot@gmail.com'];
 
 const App: React.FC = () => {
@@ -118,11 +165,10 @@ const App: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => localStorage.getItem('tsai-email') || '');
   const [userEmail, setUserEmail] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [emailError, setEmailError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
   
   const [banUntil, setBanUntil] = useState<number>(() => {
     const saved = localStorage.getItem('tsai-ban-until');
@@ -168,7 +214,6 @@ const App: React.FC = () => {
   const [showQuizResults, setShowQuizResults] = useState(false);
 
   const [isDyslexiaMode, setIsDyslexiaMode] = useState(() => localStorage.getItem('tsai-dyslexia') === 'true');
-  const [isStPatricksMode, setIsStPatricksMode] = useState(true);
   const [eggs, setEggs] = useState(() => Number(localStorage.getItem('tsai-eggs') || 0));
   const [coins, setCoins] = useState(() => Number(localStorage.getItem('tsai-coins') || 0));
   const [pendingCoins, setPendingCoins] = useState(0);
@@ -185,11 +230,6 @@ const App: React.FC = () => {
   const [hatchedPets, setHatchedPets] = useState<Pet[]>([]);
   const [luckyMessage, setLuckyMessage] = useState<string | null>(null);
   const [adminClickCount, setAdminClickCount] = useState(0);
-  const [shopStock, setShopStock] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem('tsai-shop-stock');
-    return saved ? JSON.parse(saved) : { 'premium-access': 10000, 'golden-egg-bundle': 10000 };
-  });
-
   const [nickname, setNickname] = useState(() => localStorage.getItem('tsai-nickname') || '');
   const [profilePic, setProfilePic] = useState(() => localStorage.getItem('tsai-profile-pic') || '');
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
@@ -253,6 +293,52 @@ const App: React.FC = () => {
     return () => unsub();
   }, []);
 
+  const prevUsersRef = useRef<Record<string, any>>({});
+
+
+  // Admin Notifications for user updates
+  useEffect(() => {
+    if (nickname !== ADMIN_NICKNAME || userId === 'local-user') return;
+
+    const q = query(collection(db, 'users'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'modified') {
+          const data = change.doc.data();
+          const oldData = prevUsersRef.current[change.doc.id];
+          
+          if (oldData) {
+            const changedFields = [];
+            if (data.eggs !== oldData.eggs) changedFields.push(`Eggs (${oldData.eggs} -> ${data.eggs})`);
+            if (data.coins !== oldData.coins) changedFields.push(`Coins (${oldData.coins} -> ${data.coins})`);
+            if ((data.pets || []).length !== (oldData.pets || []).length) changedFields.push(`Pets (${(oldData.pets || []).length} -> ${(data.pets || []).length})`);
+            
+            if (changedFields.length > 0) {
+              setLuckyMessage(`🔔 ADMIN: ${data.nickname || 'User'} updated: ${changedFields.join(', ')}`);
+              setTimeout(() => setLuckyMessage(null), 8000);
+            }
+          }
+        }
+        // Update ref with current data
+        prevUsersRef.current[change.doc.id] = change.doc.data();
+      });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+    
+    return () => unsub();
+  }, [nickname, userId]);
+
+  // Initial fetch for Daily Word and Motivation
+  useEffect(() => {
+    if (view === ViewState.HOME) {
+      if (!wordOfDay && !isWordLoading) {
+        fetchWordOfDay();
+      }
+      if (!motivation && !isMotivationLoading) {
+        fetchMotivation();
+      }
+    }
+  }, [view]);
+
   // Firebase Auth & User Data Sync
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -263,16 +349,19 @@ const App: React.FC = () => {
         if (user.photoURL && !profilePic) setProfilePic(user.photoURL);
         setView(ViewState.HOME);
       } else {
-        setUserId(null);
-        setUserEmail('');
-        setView(ViewState.AUTH);
+        // Only reset if not in local mode
+        setUserId(prev => prev === 'local-user' ? prev : null);
+        setUserEmail(prev => prev === 'local-user' ? prev : '');
+        if (userId !== 'local-user') {
+          setView(ViewState.AUTH);
+        }
       }
     });
     return () => unsubAuth();
-  }, []);
+  }, [userId, nickname, profilePic]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || userId === 'local-user') return;
 
     const unsubUser = onSnapshot(doc(db, 'users', userId), (docSnap) => {
       // Skip updates from local writes to prevent loops
@@ -299,14 +388,14 @@ const App: React.FC = () => {
           eggs: eggs,
           coins: coins,
           pets: pets,
-          isVerified: userEmail === ADMIN_EMAIL,
+          isVerified: userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME,
           isPremium: isPremium,
           isBanned: false,
           profilePic: profilePic || currentUser?.photoURL || '',
           lastUpdate: Date.now()
-        });
+        }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
       }
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${userId}`));
 
     return () => unsubUser();
   }, [userId]);
@@ -322,13 +411,13 @@ const App: React.FC = () => {
           setIsAnnouncementModalOpen(true);
         }
       }
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'announcements/global'));
     return () => unsubAnnouncement();
   }, []);
 
   // Sync local changes to Firestore (Debounced to save quota)
   useEffect(() => {
-    if (!userId || isBanned) return;
+    if (!userId || userId === 'local-user' || isBanned) return;
 
     const currentState = JSON.stringify({
       eggs,
@@ -389,7 +478,7 @@ const App: React.FC = () => {
         };
       });
       setLeaderboard(entries);
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
     return () => unsubLeaderboard();
   }, []);
 
@@ -445,7 +534,7 @@ const App: React.FC = () => {
         next.add(key);
         
         // Check for m + a
-        if (next.has('m') && next.has('a') && userEmail === ADMIN_EMAIL) {
+        if (next.has('m') && next.has('a') && (userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME)) {
           setIsAdminPanelOpen(true);
         }
         
@@ -469,7 +558,7 @@ const App: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [userEmail]);
+  }, [userEmail, nickname]);
 
   const hatchAllEggs = () => {
     if (eggs <= 0) return;
@@ -483,16 +572,8 @@ const App: React.FC = () => {
       const roll = Math.random() * 100;
       let pet: Pet | null = null;
 
-      if (roll <= 1 * luckMultiplier) { // 1% Rainbow (boosted by luck)
-        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.RAINBOW, name: 'Rainbow Pet', rarity: 'Legendary', chance: 1, acquiredAt: Date.now() };
-      } else if (roll <= 5 * luckMultiplier) { // 4% Gold
-        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.POT_OF_GOLD, name: 'Gold Pet', rarity: 'Epic', chance: 4, acquiredAt: Date.now() };
-      } else if (roll <= 15 * luckMultiplier) { // 10% Star
-        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.LUCKY_STAR, name: 'Star Pet', rarity: 'Rare', chance: 10, acquiredAt: Date.now() };
-      } else if (roll <= 25 * luckMultiplier) { // 10% Clover
-        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.LUCKY_CLOVER, name: 'Clover Pet', rarity: 'Rare', chance: 10, acquiredAt: Date.now() };
-      } else if (roll <= 75) { // 50% Leprechaun
-        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.LEPRECHAUN, name: 'Leprechaun Pet', rarity: 'Uncommon', chance: 50, acquiredAt: Date.now() };
+      if (roll <= 15 * luckMultiplier) { // 15% Star
+        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.LUCKY_STAR, name: 'Star Pet', rarity: 'Rare', chance: 15, acquiredAt: Date.now() };
       }
       
       if (pet) newPets.push(pet);
@@ -507,9 +588,9 @@ const App: React.FC = () => {
       setIsHatching(false);
       
       if (newPets.length > 0) {
-        setLuckyMessage(`🍀 Incredible! You hatched ${newPets.length} new pets!`);
+        setLuckyMessage(`✨ Incredible! You hatched ${newPets.length} new pets!`);
       } else {
-        setLuckyMessage("☘️ Your luck is growing! Keep searching for pets!");
+        setLuckyMessage("✨ Your luck is growing! Keep searching for pets!");
       }
       
       // Auto-hide message after 10 seconds
@@ -517,12 +598,8 @@ const App: React.FC = () => {
       
       // Update leaderboard
       updateLeaderboard(pets.length + newPets.length, [...pets, ...newPets]);
-    }, 3000);
+    }, 2000);
   };
-
-  useEffect(() => {
-    localStorage.setItem('tsai-shop-stock', JSON.stringify(shopStock));
-  }, [shopStock]);
 
   const updateLeaderboard = (count: number, allPets: Pet[], currentCoins: number = coins) => {
     const currentUserEntry: LeaderboardEntry = {
@@ -579,52 +656,6 @@ const App: React.FC = () => {
     updateLeaderboard(0, []);
   };
 
-  const handleBuyShopItem = (item: any) => {
-    if (coins < item.cost) {
-      setLuckyMessage(`❌ Insufficient funds! You need ${item.cost.toLocaleString()} coins.`);
-      setTimeout(() => setLuckyMessage(''), 5000);
-      return;
-    }
-
-    if (item.stock !== undefined && (shopStock[item.id] || 0) <= 0) {
-      setLuckyMessage(`❌ Out of stock! This item is no longer available.`);
-      setTimeout(() => setLuckyMessage(''), 5000);
-      return;
-    }
-    
-    const newCoins = coins - item.cost;
-    setCoins(newCoins);
-
-    if (item.stock !== undefined) {
-      setShopStock(prev => ({
-        ...prev,
-        [item.id]: (prev[item.id] || 10000) - 1
-      }));
-    }
-    
-    if (item.type === 'multiplier') {
-      const now = Date.now();
-      const currentEnd = multiplierEndTime > now ? multiplierEndTime : now;
-      setMultiplierEndTime(currentEnd + (3600 * 1000)); // Add 1 hour
-      setLuckyMessage(`🚀 Booster Activated! ${item.amount}x Coins for 1 hour!`);
-    } else if (item.type === 'premium') {
-      setIsPremium(true);
-      setLuckyMessage(`👑 WELCOME TO THE ELITE. Premium Access Unlocked!`);
-    } else if (item.type === 'luck') {
-      setLuckMultiplier(prev => prev + 0.5);
-      setLuckyMessage(`🍀 Luck Charm acquired! Your hatch rates have increased!`);
-    } else if (item.type === 'luck_mega') {
-      setLuckMultiplier(prev => prev + 2.0);
-      setLuckyMessage(`🌈 RAINBOW CHARM! Your hatch rates are now legendary!`);
-    } else {
-      setEggs(prev => prev + item.amount);
-      setLuckyMessage(`🛍️ Purchased ${item.amount} eggs for ${item.cost.toLocaleString()} coins!`);
-    }
-    
-    setTimeout(() => setLuckyMessage(''), 10000);
-    updateLeaderboard(pets.length, pets, newCoins);
-  };
-
   const recognitionRef = useRef<any>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const viewRef = useRef(view);
@@ -639,15 +670,6 @@ const App: React.FC = () => {
       document.body.classList.remove('dyslexia-mode');
     }
   }, [isDyslexiaMode]);
-
-  useEffect(() => {
-    localStorage.setItem('tsai-st-patrick', String(isStPatricksMode));
-    if (isStPatricksMode) {
-      document.body.classList.add('st-patrick-mode');
-    } else {
-      document.body.classList.remove('st-patrick-mode');
-    }
-  }, [isStPatricksMode]);
 
   useEffect(() => {
     viewRef.current = view;
@@ -885,18 +907,15 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleLogin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setAuthLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Auth Error:", error);
-      setEmailError('Authentication failed. Please try again.');
-    } finally {
-      setAuthLoading(false);
+  const startLocalMode = () => {
+    if (!email.trim()) {
+      setEmailError('Please enter your email to continue.');
+      return;
     }
+    setUserId('local-user');
+    setUserEmail('local@tsai.app');
+    setNickname(email.split('@')[0]);
+    setView(ViewState.HOME);
   };
 
   const handleLogout = async () => {
@@ -920,36 +939,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCloverQuestComplete = (correct: boolean) => {
-    if (correct) {
-      // Give Eggs (1 or 2 randomly)
-      const reward = Math.random() > 0.5 ? 2 : 1;
-      setEggs(prev => prev + reward);
-      setLuckyMessage(`🍀 Knowledge is Gold! ${reward} Egg${reward > 1 ? 's' : ''} added to your stash!`);
-      setTimeout(() => setLuckyMessage(''), 10000);
-      
-      // Update local leaderboard entry for current user
-      const currentUserEntry: LeaderboardEntry = {
-        id: 'user-current',
-        username: getUsername(userEmail),
-        eggs: eggs + 3,
-        petsCount: pets.length,
-        rareItems: pets.filter(p => p.rarity === 'Legendary' || p.rarity === 'Epic').map(p => p.name),
-        score: (eggs + 3) * 10 + pets.length * 100 + coins,
-        coins: coins
-      };
-      
-      setLeaderboard(prev => {
-        const filtered = prev.filter(e => e.id !== 'user-current');
-        return [...filtered, currentUserEntry];
-      });
-
-    } else {
-      setLuckyMessage("☘️ The past remains a mystery... No eggs this time!");
-    }
-    setTimeout(() => setLuckyMessage(null), 5000);
-    setView(ViewState.HOME);
-  };
   const handlePersonalityChange = (newPers: PersonalityType) => {
     setPersonality(newPers);
     localStorage.setItem('tsai-personality', newPers);
@@ -1352,7 +1341,7 @@ const App: React.FC = () => {
       setHistory(updated);
       localStorage.setItem('tsai-history', JSON.stringify(updated));
     } catch (err) {
-      setResponse("Archives accessible signal low. Retrying connection...");
+      setResponse("Archives accessible signal low. Initializing Protocol...");
     } finally {
       setLoading(false);
     }
@@ -1384,7 +1373,7 @@ const App: React.FC = () => {
   if (isBanned) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center relative">
-        <BackgroundEffect density={30} theme={isStPatricksMode ? 'st-patrick' : 'default'} />
+        <BackgroundEffect density={30} />
         
         {userEmail === ADMIN_EMAIL && (
           <button 
@@ -1397,7 +1386,7 @@ const App: React.FC = () => {
 
         <div className="z-50 glass-panel p-8 sm:p-12 rounded-[2rem] sm:rounded-[3rem] shadow-2xl max-w-md w-full">
           <div className="w-16 h-16 sm:w-24 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse"><Ban className="w-8 h-8 text-amber-600" /></div>
-          <h2 className="text-2xl sm:text-4xl font-black ai-title-text uppercase tracking-tighter premium-font">PROTOCOL SUSPENDED</h2>
+          <h2 className="text-2xl sm:text-4xl font-black tsai-title-text uppercase tracking-tighter premium-font">PROTOCOL SUSPENDED</h2>
           <div className="bg-slate-50 p-4 sm:p-6 rounded-3xl border border-slate-200 mb-6 mt-4">
             <p className="text-[9px] text-slate-400 font-black uppercase mb-1 tracking-widest">Restoring In</p>
             <div className="text-3xl sm:text-5xl font-black text-amber-600 tabular-nums">{Math.floor(banTimeRemaining / 60)}:{String(banTimeRemaining % 60).padStart(2, '0')}</div>
@@ -1411,36 +1400,53 @@ const App: React.FC = () => {
   if (view === ViewState.AUTH) {
     return (
       <div className="min-h-screen relative flex items-center justify-center p-4 sm:p-6 overflow-hidden">
-        <BackgroundEffect density={40} theme={isStPatricksMode ? 'st-patrick' : 'default'} />
+        <BackgroundEffect density={40} />
         <div className="z-30 w-full max-w-md animate-in fade-in zoom-in-95 duration-700">
           <div className="glass-panel p-6 sm:p-12 rounded-[2rem] sm:rounded-[3rem] text-center shadow-2xl relative">
             <div className="absolute -top-6 sm:-top-10 left-1/2 -translate-x-1/2 bg-white p-3 sm:p-4 rounded-full shadow-lg border border-slate-200"><Diamond className="w-6 h-6 text-amber-500" /></div>
-            <h1 className="text-5xl sm:text-8xl ai-title-text premium-font mb-1 sm:mb-2 mt-4 sm:mt-6">TSAI</h1>
+            <h1 className="text-5xl sm:text-8xl tsai-title-text premium-font mb-1 sm:mb-2 mt-4 sm:mt-6">TSAI</h1>
             <p className="text-slate-400 text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em] mb-6 sm:mb-10">Premium Intelligence Gateway</p>
             
             <div className="space-y-6">
               <div className="relative group text-left">
                 <label className="block text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 ml-4">Elite Identity</label>
-                <button 
-                  onClick={handleLogin} 
-                  disabled={authLoading}
-                  className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 p-4 rounded-3xl hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
-                >
-                  {authLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
-                  ) : (
-                    <>
-                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-                      <span className="text-sm font-bold text-slate-700">Continue with Google</span>
-                    </>
-                  )}
-                </button>
-                {emailError && <div className="flex items-center gap-1.5 mt-2 ml-4 text-red-400 text-[9px] font-bold uppercase">{emailError}</div>}
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <input 
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      localStorage.setItem('tsai-email', e.target.value);
+                    }}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') startLocalMode();
+                    }}
+                    placeholder="Enter your email..."
+                    className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-3xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-all text-sm font-bold text-slate-700"
+                  />
+                </div>
+                {emailError && (
+                  <div className="mt-4 p-4 bg-red-50 border border-red-100 rounded-2xl animate-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2 text-red-600 text-[10px] font-black uppercase mb-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>{emailError}</span>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              <button 
+                onClick={startLocalMode}
+                className="w-full flex items-center justify-center gap-3 bg-amber-500 text-white p-4 rounded-3xl hover:bg-amber-600 transition-all active:scale-95 shadow-lg shadow-amber-500/20 font-black uppercase tracking-widest text-xs"
+              >
+                <LogIn className="w-5 h-5" />
+                <span>Sign In</span>
+              </button>
 
               <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
                 <p className="text-[9px] font-bold text-amber-700 uppercase tracking-widest leading-relaxed">
-                  Authentication is required to sync your progress, pets, and global rank across all devices.
+                  Enter your email to begin. Your data will be saved locally on this device.
                 </p>
               </div>
             </div>
@@ -1451,8 +1457,8 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className={`min-h-screen relative flex flex-col text-slate-600 antialiased overflow-x-hidden ${isStPatricksMode ? 'bg-[#0a2e1a]' : 'silver-white-bg'}`}>
-      <BackgroundEffect density={50} theme={isStPatricksMode ? 'st-patrick' : 'default'} />
+    <div className="min-h-screen relative flex flex-col text-slate-600 antialiased overflow-x-hidden silver-white-bg">
+      <BackgroundEffect density={50} />
       
       <AnimatePresence>
         {quotaExceeded && (
@@ -1496,63 +1502,11 @@ const App: React.FC = () => {
               </motion.div>
             </motion.div>
             <h2 className="text-4xl sm:text-6xl font-black text-white premium-font tracking-tighter mt-8 animate-pulse">HATCHING ALL EGGS...</h2>
-            <p className="text-green-400 font-black uppercase tracking-widest mt-4">May the luck of the Irish be with you!</p>
+            <p className="text-amber-400 font-black uppercase tracking-widest mt-4">May the luck of the stars be with you!</p>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {isStPatricksMode && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-4 bg-green-600/20 backdrop-blur-md px-6 py-3 rounded-full border border-green-500/30 shadow-2xl">
-          <div className="flex items-center gap-2 border-r border-white/10 pr-4">
-            <span className="text-xl">🥚</span>
-            <div className="flex flex-col">
-              <span className="text-white font-black premium-font text-[10px] leading-none">{eggs} Eggs</span>
-              {eggs > 0 && (
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setView(ViewState.PETS);
-                    setTimeout(() => hatchAllEggs(), 100);
-                  }}
-                  className="text-amber-400 font-black text-[8px] uppercase tracking-widest hover:text-amber-300 transition-colors animate-pulse"
-                >
-                  Hatch Now!
-                </button>
-              )}
-            </div>
-          </div>
-          <button 
-            onClick={() => setView(ViewState.PETS)}
-            className="flex items-center gap-2 border-r border-white/10 pr-4 hover:scale-105 transition-transform"
-          >
-            <Dog className="w-5 h-5 text-blue-400" />
-            <span className="text-white font-black premium-font">{pets.length} Pets</span>
-          </button>
-          <div className="flex flex-col gap-1 border-r border-white/10 pr-4">
-            <button 
-              onClick={() => setView(ViewState.LEADERBOARD)}
-              className="flex items-center gap-2 hover:scale-105 transition-transform"
-            >
-              <Trophy className="w-4 h-4 text-yellow-400" />
-              <span className="text-white font-black premium-font text-[10px] leading-none">Rank #{leaderboard.findIndex(e => e.id === 'user-current') + 1 || '?'}</span>
-            </button>
-            <button 
-              onClick={() => setView(ViewState.SHOP)}
-              className="flex items-center gap-2 hover:scale-105 transition-transform"
-            >
-              <ShoppingBag className="w-4 h-4 text-amber-500" />
-              <span className="text-white font-black premium-font text-[10px] leading-none">Shop</span>
-            </button>
-          </div>
-          
-          <StatsBar 
-            coins={coins}
-            pendingCoins={pendingCoins}
-            multiplierEndTime={multiplierEndTime}
-            onCollect={collectCoins}
-          />
-        </div>
-      )}
       <div className="fixed top-3 right-3 sm:top-8 sm:right-8 z-[80] animate-in slide-in-from-right-4 duration-500">
         <div className="glass-panel px-3 py-2 sm:px-6 sm:py-4 rounded-[1.25rem] sm:rounded-[2rem] shadow-xl border-slate-200 flex items-center gap-3">
           <div className="flex flex-col items-end">
@@ -1586,7 +1540,7 @@ const App: React.FC = () => {
               <User className="w-3.5 h-3.5 sm:w-5 h-5" />
             )}
           </div>
-          {userEmail === ADMIN_EMAIL && (
+          {(userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME) && (
             <button 
               onClick={() => setIsAdminPanelOpen(true)}
               className="p-2 sm:p-2.5 bg-white text-amber-500 rounded-xl sm:rounded-2xl hover:bg-amber-50 transition-all active:scale-90 border border-slate-200"
@@ -1602,7 +1556,16 @@ const App: React.FC = () => {
       </div>
 
       <header className="z-10 px-4 py-8 sm:py-12 sm:pt-24 flex flex-col items-center">
-        <h1 className="text-5xl sm:text-8xl md:text-9xl ai-title-text premium-font select-none mb-1">TSAI</h1>
+        <h1 
+          onClick={() => {
+            if (userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME) {
+              setIsAdminPanelOpen(true);
+            }
+          }}
+          className="text-5xl sm:text-8xl md:text-9xl tsai-title-text premium-font select-none mb-1 cursor-pointer"
+        >
+          TSAI
+        </h1>
         <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
             <Sparkles className="w-4 h-4 text-amber-500" />
             <p className="text-slate-400 text-[8px] sm:text-[11px] font-bold uppercase tracking-[0.3em]">Advanced Intelligence Core</p>
@@ -1631,68 +1594,7 @@ const App: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6 sm:space-y-8 max-w-5xl mx-auto"
           >
-            {isStPatricksMode && (
-              <div className="flex justify-center mb-4 animate-bounce">
-                <div className="relative">
-                  <span className="text-6xl sm:text-8xl">🏺</span>
-                  <span className="absolute -top-4 -right-4 text-4xl sm:text-6xl animate-pulse">🌈</span>
-                  <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex gap-1">
-                    <span className="text-xl">🪙</span>
-                    <span className="text-xl">🪙</span>
-                    <span className="text-xl">🪙</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-4 sm:gap-8">
-              <div className="lg:col-span-2 glass-panel p-6 rounded-[2rem] border-2 border-green-500/30 bg-green-900/20 transition-all flex flex-col sm:flex-row items-center justify-between group overflow-hidden relative gap-6">
-                <div className="flex items-center gap-6 relative z-10">
-                  <div className="w-16 h-16 bg-green-500/20 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Clover className="w-8 h-8 text-green-400 animate-pulse" />
-                  </div>
-                  <div className="text-left">
-                    <h3 className="text-2xl sm:text-3xl font-black text-white premium-font">CLOVER QUEST</h3>
-                    <p className="text-green-200/60 text-xs font-bold uppercase tracking-widest">Test your luck & earn eggs</p>
-                  </div>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3 relative z-10 w-full sm:w-auto">
-                  {eggs > 0 && (
-                    <button 
-                      onClick={hatchAllEggs}
-                      className="flex-grow sm:flex-none flex items-center justify-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20 animate-pulse"
-                    >
-                      <Zap className="w-3.5 h-3.5" /> Hatch All
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => setView(ViewState.LEADERBOARD)}
-                    className="flex-grow sm:flex-none flex items-center justify-center gap-2 bg-white/10 text-white px-4 py-2.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-white/20 transition-all"
-                  >
-                    <Trophy className="w-3.5 h-3.5 text-yellow-400" /> Leaderboard
-                  </button>
-                  <button 
-                    onClick={() => setView(ViewState.PETS)}
-                    className="flex-grow sm:flex-none flex items-center justify-center gap-2 bg-white/10 text-white px-4 py-2.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-white/20 transition-all"
-                  >
-                    <Dog className="w-3.5 h-3.5 text-blue-400" /> Pets
-                  </button>
-                  <button 
-                    onClick={() => setView(ViewState.BUGS)}
-                    className="flex-grow sm:flex-none flex items-center justify-center gap-2 bg-white/10 text-white px-4 py-2.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-white/20 transition-all"
-                  >
-                    <Bug className="w-3.5 h-3.5" /> Bugs
-                  </button>
-                  <button 
-                    onClick={() => setView(ViewState.CLOVER_QUEST)}
-                    className="w-full sm:w-auto flex items-center justify-center gap-2 bg-green-500 text-white px-6 py-3 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-green-400 group-hover:gap-4 transition-all"
-                  >
-                    Play Now <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-                
-                <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-green-500/10 rounded-full blur-3xl group-hover:scale-150 transition-transform" />
-              </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
               <div className="glass-panel p-6 sm:p-10 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-xl overflow-hidden relative group flex flex-col justify-between min-h-[280px] sm:min-h-[320px]">
                 <div className="absolute top-0 right-0 w-48 h-48 bg-slate-50 rounded-full -translate-y-24 translate-x-24 blur-3xl opacity-30"></div>
                 <div className="flex flex-col items-center gap-4 sm:gap-6 relative z-10 py-2 sm:py-4">
@@ -1711,7 +1613,7 @@ const App: React.FC = () => {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center group/title">
-                        <h2 className="text-xl sm:text-4xl font-black ai-title-text premium-font tracking-tight flex items-center gap-2 mb-0.5 sm:mb-1">
+                        <h2 className="text-xl sm:text-4xl font-black tsai-title-text premium-font tracking-tight flex items-center gap-2 mb-0.5 sm:mb-1">
                           {examName}
                           <button onClick={() => setIsEditingExam(true)} className="opacity-0 group-hover/title:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg transition-all"><Edit2 className="w-3.5 h-3.5 text-slate-300" /></button>
                         </h2>
@@ -1723,7 +1625,7 @@ const App: React.FC = () => {
                     {[{ label: 'DAYS', value: timeLeft.days }, { label: 'HOURS', value: timeLeft.hours }, { label: 'MINS', value: timeLeft.mins }].map((unit, i) => (
                       <div key={i} className="flex flex-col items-center">
                         <div className="w-16 h-16 sm:w-24 bg-white border border-slate-200 rounded-[1.25rem] sm:rounded-[2rem] flex items-center justify-center shadow-sm mb-2 transform group-hover:translate-y-[-4px] transition-all">
-                          <span className="text-xl sm:text-4xl font-black ai-title-text premium-font">{unit.value.toString().padStart(2, '0')}</span>
+                          <span className="text-xl sm:text-4xl font-black tsai-title-text premium-font">{unit.value.toString().padStart(2, '0')}</span>
                         </div>
                         <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-[0.1em] text-slate-400">{unit.label}</span>
                       </div>
@@ -1749,7 +1651,7 @@ const App: React.FC = () => {
                       <div className="animate-in fade-in">
                         {!isTranslated ? (
                           <div className="min-w-0">
-                            <h3 className="text-2xl sm:text-3xl font-black ai-title-text premium-font leading-tight mb-1">{parsedWord.word}</h3>
+                            <h3 className="text-2xl sm:text-3xl font-black tsai-title-text premium-font leading-tight mb-1">{parsedWord.word}</h3>
                             <p className="text-[10px] text-slate-400 italic mb-4">{parsedWord.pronunciation} • {parsedWord.origin}</p>
                           </div>
                         ) : (
@@ -1781,7 +1683,7 @@ const App: React.FC = () => {
                       <div className="py-6 sm:py-8 flex flex-col items-center"><Loader2 className="w-5 h-5 text-amber-500 animate-spin" /></div>
                     ) : parsedMotivation ? (
                       <div className="animate-in fade-in">
-                        <h4 className="text-[8px] sm:text-[10px] font-black ai-title-text uppercase mb-1">{parsedMotivation.title}</h4>
+                        <h4 className="text-[8px] sm:text-[10px] font-black tsai-title-text uppercase mb-1">{parsedMotivation.title}</h4>
                         <p className="text-base sm:text-lg font-black text-slate-900 premium-font italic leading-tight mb-2">"{parsedMotivation.quote}"</p>
                       </div>
                     ) : null}
@@ -1793,7 +1695,6 @@ const App: React.FC = () => {
 
             <ToolGrid 
               onOpenTool={openTool}
-              onOpenShop={() => setView(ViewState.SHOP)}
             />
           </motion.div>
         ) : view === ViewState.TALES ? (
@@ -1884,25 +1785,12 @@ const App: React.FC = () => {
           </div>
         ) : view === ViewState.BUGS ? (
           <BugsPage onBack={() => setView(ViewState.HOME)} />
-        ) : view === ViewState.LEADERBOARD || view === ViewState.SHOP ? (
+        ) : view === ViewState.LEADERBOARD ? (
           <div className="max-w-4xl mx-auto space-y-12 pb-20">
             <Leaderboard 
               entries={leaderboard} 
               onBack={() => setView(ViewState.HOME)} 
-              onOpenShop={() => {
-                document.getElementById('shop-section')?.scrollIntoView({ behavior: 'smooth' });
-              }}
             />
-            <div id="shop-section" className="border-t border-white/10 pt-12">
-              <Shop 
-                coins={coins}
-                multiplierEndTime={multiplierEndTime}
-                isPremium={isPremium}
-                shopStock={shopStock}
-                onBack={() => setView(ViewState.HOME)}
-                onBuyItem={handleBuyShopItem}
-              />
-            </div>
           </div>
         ) : view === ViewState.PETS ? (
           <PetDisplay 
@@ -1916,14 +1804,6 @@ const App: React.FC = () => {
             onDeletePet={handleDeletePet}
             onDeleteAllPets={handleDeleteAllPets}
             onCollect={collectCoins}
-          />
-        ) : view === ViewState.CLOVER_QUEST ? (
-          <CloverQuest 
-            grade={grade}
-            eggs={eggs}
-            onHatchAll={hatchAllEggs}
-            onComplete={handleCloverQuestComplete} 
-            onClose={() => setView(ViewState.HOME)} 
           />
         ) : (
           <div className="flex flex-col gap-6 sm:gap-8 animate-in fade-in slide-in-from-right-4 duration-500 max-w-5xl mx-auto">
@@ -1941,7 +1821,6 @@ const App: React.FC = () => {
             {activeTab === ToolType.CODING ? (
               <div className="flex flex-col gap-4 animate-in fade-in duration-700">
                 <div className="glass-panel overflow-hidden rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl relative min-h-[600px] flex border border-slate-200 bg-[#fefefe]">
-                  
                   {/* VS Code Inspired Sidebar */}
                   <div className="w-12 sm:w-16 bg-[#f3f3f3] border-r border-slate-200 flex flex-col items-center py-6 gap-6 shrink-0">
                     <Files className="w-5 h-5 sm:w-6 sm:h-6 text-[#858585] cursor-pointer hover:text-amber-600 transition-colors" />
@@ -2023,7 +1902,7 @@ const App: React.FC = () => {
                     <div className="w-20 h-20 sm:w-24 sm:h-24 bg-amber-50 rounded-[2rem] flex items-center justify-center mb-8 shadow-inner">
                       <FileUp className="w-10 h-10 sm:w-12 sm:h-12 text-amber-600" />
                     </div>
-                    <h2 className="text-3xl sm:text-5xl font-black ai-title-text premium-font mb-4">Study Set Architect</h2>
+                    <h2 className="text-3xl sm:text-5xl font-black tsai-title-text premium-font mb-4">Study Set Architect</h2>
                     <p className="text-slate-400 text-sm sm:text-lg font-medium max-w-lg mb-10 leading-relaxed">
                       Transform static materials into interactive mastery tools. Upload a photo of your notes or a PDF to begin.
                     </p>
@@ -2103,7 +1982,7 @@ const App: React.FC = () => {
                           <div className="flex items-center gap-3 mb-8">
                             <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center"><Files className="w-5 h-5 text-amber-600" /></div>
                             <div>
-                              <h3 className="text-xl sm:text-2xl font-black ai-title-text premium-font">Simplified Summary</h3>
+                              <h3 className="text-xl sm:text-2xl font-black tsai-title-text premium-font">Simplified Summary</h3>
                               <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Base Understanding Protocol</p>
                             </div>
                           </div>
@@ -2173,7 +2052,7 @@ const App: React.FC = () => {
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center"><BookOpenCheck className="w-5 h-5 text-amber-600" /></div>
                               <div>
-                                <h3 className="text-xl sm:text-2xl font-black ai-title-text premium-font">Mastery Quiz</h3>
+                                <h3 className="text-xl sm:text-2xl font-black tsai-title-text premium-font">Mastery Quiz</h3>
                                 <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Precision Assessment</p>
                               </div>
                             </div>
@@ -2314,7 +2193,7 @@ const App: React.FC = () => {
         {showHistory && (
           <div className="glass-panel w-[calc(100vw-2rem)] sm:w-80 max-h-[60vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-300 border-slate-200">
             <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white/50">
-              <h3 className="text-[10px] font-black uppercase tracking-widest ai-title-text premium-font flex items-center gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-widest tsai-title-text premium-font flex items-center gap-2">
                 <History className="w-4 h-4 text-amber-500" /> Session Logs
               </h3>
               <div className="flex gap-2">
@@ -2332,7 +2211,7 @@ const App: React.FC = () => {
                       <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase bg-slate-50 border border-slate-100">{item.type}</span>
                       <span className="text-[8px] text-slate-300">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <p className="text-[10px] font-bold ai-title-text premium-font line-clamp-1">{item.query}</p>
+                    <p className="text-[10px] font-bold tsai-title-text premium-font line-clamp-1">{item.query}</p>
                     <p className="text-[9px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">{item.response}</p>
                   </div>
                 ))
@@ -2346,7 +2225,7 @@ const App: React.FC = () => {
       </div>
       
       <footer className="p-4 sm:p-12 flex justify-center fixed bottom-0 left-0 right-0 pointer-events-none">
-        <p className="text-[7px] sm:text-[10px] font-black tracking-[0.4em] sm:tracking-[1.2em] ai-title-text opacity-30 uppercase select-none">TSAI PREMIUM INTELLIGENCE CORE</p>
+        <p className="text-[7px] sm:text-[10px] font-black tracking-[0.4em] sm:tracking-[1.2em] tsai-title-text opacity-30 uppercase select-none">PREMIUM INTELLIGENCE CORE</p>
       </footer>
 
       <AnimatePresence>
@@ -2568,34 +2447,6 @@ const App: React.FC = () => {
                 Acknowledge
               </button>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Corner Announcement Ticker */}
-      <AnimatePresence>
-        {!isAnnouncementModalOpen && announcement && (
-          <motion.div 
-            initial={{ x: -100, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -100, opacity: 0 }}
-            className="fixed bottom-6 left-6 z-[350] max-w-xs"
-          >
-            <button 
-              onClick={() => setIsAnnouncementModalOpen(true)}
-              className="glass-panel p-4 rounded-2xl border-amber-500/30 bg-black/40 backdrop-blur-md flex items-center gap-4 group hover:bg-amber-500/10 transition-all"
-            >
-              <div className="p-2 bg-amber-500 rounded-lg group-hover:rotate-12 transition-transform">
-                <Sparkles className="w-4 h-4 text-white" />
-              </div>
-              <div className="text-left overflow-hidden">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest">{announcementSender}</p>
-                  <BadgeCheck className="w-3 h-3 text-[#0095f6] fill-white" />
-                </div>
-                <p className="text-xs font-bold text-white truncate w-40">{announcement}</p>
-              </div>
-            </button>
           </motion.div>
         )}
       </AnimatePresence>

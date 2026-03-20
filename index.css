@@ -44,7 +44,7 @@
     box-shadow: none !important;
   }
 
-  body.dyslexia-mode .ai-title-text {
+  body.dyslexia-mode .tsai-title-text {
     color: #000000 !important;
     text-shadow: none !important;
   }
@@ -65,7 +65,7 @@
     color: #ffffff !important;
   }
 
-  body.st-patrick-mode .ai-title-text {
+  body.st-patrick-mode .tsai-title-text {
     background: linear-gradient(135deg, #22c55e, #fbbf24, #22c55e) !important;
     -webkit-background-clip: text !important;
     -webkit-text-fill-color: transparent !important;
@@ -113,7 +113,7 @@
     background-size: cover;
   }
 
-  .ai-title-text {
+  .tsai-title-text {
     background: linear-gradient(135deg, #b8860b, #d4af37, #b8860b);
     background-size: 200% 200%;
     -webkit-background-clip: text;

@@ -29,19 +29,13 @@ export const getGeminiResponse = async (
     case PersonalityType.SOCRATIC:
       personalityInstruction = "Persona: Socratic Tutor. DO NOT give the answer immediately. Instead, guide the student to find it by asking leading questions. Break down the problem into smaller steps and ask the student what the next logical move should be. Support academic integrity and genuine learning.";
       break;
-    case PersonalityType.LEPRECHAUN:
-      personalityInstruction = "Persona: Lucky Leprechaun. Be mischievous, cheerful, and full of Irish charm. Use phrases like 'Happy St. Patrick's Day!', 'Feeling lucky today?', 'Top o' the mornin'', 'Faith and Begorra', and 'Luck of the Irish'. Mention pots of gold, rainbows, and four-leaf clovers. Keep the academic quality high but delivered with a playful, magical twist.";
-      break;
   }
 
   const premiumStatus = isPremium 
     ? "PREMIUM PROTOCOL ACTIVE: You are operating in ELITE MODE. Provide maximum depth, advanced reasoning, and exhaustive detail. Use sophisticated vocabulary and complex structural analysis."
     : "STANDARD PROTOCOL: Provide clear, efficient, and accurate responses.";
 
-  const isStPatricksUpdate = true;
-  const stPatricksTwist = "SPECIAL DIRECTIVE: It is St. Patrick's Day season. Infuse your response with a touch of Irish luck and festive cheer. Mention a 'Lucky Fact' or a 'Clover Tip' if appropriate. ";
-
-  const premiumPrefix = `PROTOCOL ACTIVE: You are TSAI, the world's most sophisticated intelligence interface. ${premiumStatus} ${personalityInstruction} ${stPatricksTwist} Your output must be elegant, professional, and accurate, reflecting an elite user experience. `;
+  const premiumPrefix = `PROTOCOL ACTIVE: You are TSAI, the world's most sophisticated intelligence interface. ${premiumStatus} ${personalityInstruction} Your output must be elegant, professional, and accurate, reflecting an elite user experience. `;
 
   let systemInstruction = "";
   let responseMimeType = "text/plain";
@@ -171,6 +165,6 @@ export const getGeminiResponse = async (
     return { text: fullText, sources: finalSources };
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return { text: "Protocol Interrupted. Re-initiate connection.", sources: [] };
+    return { text: "Protocol Interrupted. Initialize Protocol.", sources: [] };
   }
 };

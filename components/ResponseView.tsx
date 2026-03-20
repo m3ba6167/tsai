@@ -58,7 +58,7 @@ const ResponseView: React.FC<ResponseViewProps> = ({
         </div>
       )}
 
-      <div className="markdown-body prose prose-slate prose-sm sm:prose-base lg:prose-lg max-w-none text-slate-700 font-medium overflow-wrap-break-word prose-headings:ai-title-text prose-headings:font-black prose-headings:tracking-tighter prose-p:leading-relaxed prose-li:leading-relaxed prose-strong:text-amber-600">
+      <div className="markdown-body prose prose-slate prose-sm sm:prose-base lg:prose-lg max-w-none text-slate-700 font-medium overflow-wrap-break-word prose-headings:tsai-title-text prose-headings:font-black prose-headings:tracking-tighter prose-p:leading-relaxed prose-li:leading-relaxed prose-strong:text-amber-600">
         <Markdown>{content}</Markdown>
       </div>
       
