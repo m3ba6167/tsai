@@ -7,7 +7,8 @@ export enum ToolType {
   CODING = 'CODE ASTRO',
   MOTIVATION = 'MOTIVATION',
   STUDY = 'STUDY GEN',
-  VOICE_CONCEPT = 'VOICE ARCHITECT'
+  VOICE_CONCEPT = 'VOICE ARCHITECT',
+  GENERAL = 'GENERAL QUESTIONS'
 }
 
 export enum ViewState {
@@ -17,30 +18,13 @@ export enum ViewState {
   TALES = 'TALES',
   BUGS = 'BUGS',
   LEADERBOARD = 'LEADERBOARD',
-  PETS = 'PETS'
-}
-
-export enum PetType {
-  LUCKY_STAR = 'LUCKY_STAR'
-}
-
-export interface Pet {
-  id: string;
-  type: PetType;
-  name: string;
-  rarity: string;
-  chance: number;
-  acquiredAt: number;
+  GENERAL = 'GENERAL'
 }
 
 export interface LeaderboardEntry {
   id: string;
   username: string;
-  eggs: number;
-  petsCount: number;
-  rareItems: string[];
   score: number;
-  coins: number;
   isPremium?: boolean;
   isBanned?: boolean;
   isVerified?: boolean;

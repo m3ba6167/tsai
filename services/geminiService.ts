@@ -114,6 +114,11 @@ export const getGeminiResponse = async (
       III. [Key Argument 2]
       IV. [Conclusion]
     - TONE: Professional, analytical, and highly organized.`;
+  } else if (type === ToolType.GENERAL) {
+    systemInstruction = premiumPrefix + `MODULE: General Intelligence Core.
+    - Target Level: ${grade}.
+    - MISSION: Provide high-fidelity, helpful, and insightful responses to any inquiry. Use expert-level analysis and clear communication.
+    - FORMAT: Optimal Markdown readability with structured sections if the response is lengthy.`;
   }
 
   try {

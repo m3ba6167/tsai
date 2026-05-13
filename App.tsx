@@ -52,19 +52,18 @@ import {
   Volume2,
   Square,
   Bug,
-  Dog,
   Trophy,
   Zap,
   Camera,
   Coins,
-  Plus
+  Plus,
+  MessageSquare
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 import ResponseView from './components/ResponseView.tsx';
 import BackgroundEffect from './components/BackgroundEffect.tsx';
 import BugsPage from './components/BugsPage.tsx';
-import PetDisplay from './components/PetDisplay.tsx';
 import Leaderboard from './components/Leaderboard.tsx';
 import StatsBar from './components/StatsBar.tsx';
 import ToolGrid from './components/ToolGrid.tsx';
@@ -89,7 +88,7 @@ import {
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
-import { ToolType, HistoryItem, ViewState, PersonalityType, Pet, PetType, LeaderboardEntry } from './types.ts';
+import { ToolType, HistoryItem, ViewState, PersonalityType, LeaderboardEntry } from './types.ts';
 
 enum OperationType {
   CREATE = 'create',
@@ -214,21 +213,13 @@ const App: React.FC = () => {
   const [showQuizResults, setShowQuizResults] = useState(false);
 
   const [isDyslexiaMode, setIsDyslexiaMode] = useState(() => localStorage.getItem('tsai-dyslexia') === 'true');
-  const [eggs, setEggs] = useState(() => Number(localStorage.getItem('tsai-eggs') || 0));
-  const [coins, setCoins] = useState(() => Number(localStorage.getItem('tsai-coins') || 0));
-  const [pendingCoins, setPendingCoins] = useState(0);
   const [isPremium, setIsPremium] = useState(() => localStorage.getItem('tsai-premium') === 'true');
   const [isVerified, setIsVerified] = useState(() => localStorage.getItem('tsai-verified') === 'true');
   const [luckMultiplier, setLuckMultiplier] = useState(() => Number(localStorage.getItem('tsai-luck-multiplier') || 1));
-  const [pets, setPets] = useState<Pet[]>(() => JSON.parse(localStorage.getItem('tsai-pets') || '[]'));
-  const [multiplierEndTime, setMultiplierEndTime] = useState(() => Number(localStorage.getItem('tsai-multiplier-end') || 0));
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
     const saved = localStorage.getItem('tsai-leaderboard');
     return saved ? JSON.parse(saved) : [];
   });
-  const [isHatching, setIsHatching] = useState(false);
-  const [hatchedPets, setHatchedPets] = useState<Pet[]>([]);
-  const [luckyMessage, setLuckyMessage] = useState<string | null>(null);
   const [adminClickCount, setAdminClickCount] = useState(0);
   const [nickname, setNickname] = useState(() => localStorage.getItem('tsai-nickname') || '');
   const [profilePic, setProfilePic] = useState(() => localStorage.getItem('tsai-profile-pic') || '');
@@ -247,11 +238,8 @@ const App: React.FC = () => {
   const [keysPressed, setKeysPressed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    localStorage.setItem('tsai-eggs', eggs.toString());
-    localStorage.setItem('tsai-coins', coins.toString());
-    localStorage.setItem('tsai-pets', JSON.stringify(pets));
     localStorage.setItem('tsai-leaderboard', JSON.stringify(leaderboard));
-  }, [eggs, coins, pets, leaderboard]);
+  }, [leaderboard]);
 
   useEffect(() => {
     localStorage.setItem('tsai-custom-admin-cmds', JSON.stringify(customAdminCommands));
@@ -261,11 +249,7 @@ const App: React.FC = () => {
     localStorage.setItem('tsai-announcement', announcement);
   }, [announcement]);
 
-  // Passive income logic
-  useEffect(() => {
-    localStorage.setItem('tsai-multiplier-end', String(multiplierEndTime));
-  }, [multiplierEndTime]);
-
+  // Passive income logic removed
   useEffect(() => {
     localStorage.setItem('tsai-premium', String(isPremium));
   }, [isPremium]);
@@ -295,37 +279,6 @@ const App: React.FC = () => {
 
   const prevUsersRef = useRef<Record<string, any>>({});
 
-
-  // Admin Notifications for user updates
-  useEffect(() => {
-    if (nickname !== ADMIN_NICKNAME || userId === 'local-user') return;
-
-    const q = query(collection(db, 'users'));
-    const unsub = onSnapshot(q, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'modified') {
-          const data = change.doc.data();
-          const oldData = prevUsersRef.current[change.doc.id];
-          
-          if (oldData) {
-            const changedFields = [];
-            if (data.eggs !== oldData.eggs) changedFields.push(`Eggs (${oldData.eggs} -> ${data.eggs})`);
-            if (data.coins !== oldData.coins) changedFields.push(`Coins (${oldData.coins} -> ${data.coins})`);
-            if ((data.pets || []).length !== (oldData.pets || []).length) changedFields.push(`Pets (${(oldData.pets || []).length} -> ${(data.pets || []).length})`);
-            
-            if (changedFields.length > 0) {
-              setLuckyMessage(`🔔 ADMIN: ${data.nickname || 'User'} updated: ${changedFields.join(', ')}`);
-              setTimeout(() => setLuckyMessage(null), 8000);
-            }
-          }
-        }
-        // Update ref with current data
-        prevUsersRef.current[change.doc.id] = change.doc.data();
-      });
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
-    
-    return () => unsub();
-  }, [nickname, userId]);
 
   // Initial fetch for Daily Word and Motivation
   useEffect(() => {
@@ -371,9 +324,6 @@ const App: React.FC = () => {
         const data = docSnap.data();
         
         // Only update if data is different to avoid unnecessary re-renders/syncs
-        setEggs(prev => prev !== (data.eggs ?? 0) ? (data.eggs ?? 0) : prev);
-        setCoins(prev => prev !== (data.coins ?? 0) ? (data.coins ?? 0) : prev);
-        setPets(prev => JSON.stringify(prev) !== JSON.stringify(data.pets ?? []) ? (data.pets ?? []) : prev);
         setIsVerified(prev => prev !== (data.isVerified ?? false) ? (data.isVerified ?? false) : prev);
         setIsPremium(prev => prev !== (data.isPremium ?? false) ? (data.isPremium ?? false) : prev);
         setIsBanned(prev => prev !== (data.isBanned ?? false) ? (data.isBanned ?? false) : prev);
@@ -383,11 +333,8 @@ const App: React.FC = () => {
         // Initialize user document
         const currentUser = auth.currentUser;
         setDoc(doc(db, 'users', userId), {
-          nickname: nickname || currentUser?.displayName || getUsername(userEmail),
+          nickname: nickname || currentUser?.displayName || userEmail.split('@')[0],
           email: userEmail,
-          eggs: eggs,
-          coins: coins,
-          pets: pets,
           isVerified: userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME,
           isPremium: isPremium,
           isBanned: false,
@@ -420,9 +367,6 @@ const App: React.FC = () => {
     if (!userId || userId === 'local-user' || isBanned) return;
 
     const currentState = JSON.stringify({
-      eggs,
-      coins,
-      pets,
       isVerified,
       isPremium,
       isBanned,
@@ -435,9 +379,6 @@ const App: React.FC = () => {
 
     const timer = setTimeout(() => {
       updateDoc(doc(db, 'users', userId), {
-        eggs,
-        coins,
-        pets,
         isVerified,
         isPremium,
         isBanned,
@@ -457,22 +398,18 @@ const App: React.FC = () => {
       });
     }, 5000);
     return () => clearTimeout(timer);
-  }, [eggs, coins, pets, isVerified, isPremium, isBanned, nickname, profilePic, userId]);
+  }, [isVerified, isPremium, isBanned, nickname, profilePic, userId]);
 
   // Global Leaderboard Sync
   useEffect(() => {
-    const q = query(collection(db, 'users'), orderBy('coins', 'desc'), limit(50));
+    const q = query(collection(db, 'users'), orderBy('score', 'desc'), limit(50));
     const unsubLeaderboard = onSnapshot(q, (snapshot) => {
       const entries: LeaderboardEntry[] = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
-          username: data.nickname || getUsername(data.email),
-          eggs: data.eggs || 0,
-          petsCount: (data.pets || []).length,
-          rareItems: (data.pets || []).filter((p: any) => p.rarity === 'Legendary' || p.rarity === 'Epic').map((p: any) => p.name),
-          score: (data.pets || []).length * 100 + (data.pets || []).filter((p: any) => p.rarity === 'Legendary' || p.rarity === 'Epic').length * 500 + (data.coins || 0),
-          coins: data.coins || 0,
+          username: data.nickname || data.email?.split('@')[0] || 'Unknown',
+          score: data.score || 0,
           isPremium: data.isPremium || false,
           isVerified: data.isVerified || false
         };
@@ -485,45 +422,6 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('tsai-luck-multiplier', String(luckMultiplier));
   }, [luckMultiplier]);
-
-  const incomePerSecond = useMemo(() => {
-    let income = 0;
-    pets.forEach(pet => {
-      switch (pet.rarity) {
-        case 'Legendary': income += 10; break;
-        case 'Epic': income += 4; break;
-        case 'Rare': income += 2; break;
-        case 'Uncommon': income += 1; break;
-        default: income += 0.5; break;
-      }
-    });
-    return income;
-  }, [pets]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (pets.length === 0) return;
-      
-      let currentIncome = incomePerSecond;
-      
-      // Apply multiplier if active
-      if (Date.now() < multiplierEndTime) {
-        currentIncome *= 2;
-      }
-      
-      setPendingCoins(prev => prev + currentIncome);
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [pets.length, multiplierEndTime, incomePerSecond]);
-
-  const collectCoins = () => {
-    if (pendingCoins <= 0) return;
-    setCoins(prev => prev + pendingCoins);
-    setPendingCoins(0);
-    setLuckyMessage(`💰 Collected ${pendingCoins.toLocaleString()} coins from your pets!`);
-    setTimeout(() => setLuckyMessage(''), 3000);
-  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -560,100 +458,20 @@ const App: React.FC = () => {
     };
   }, [userEmail, nickname]);
 
-  const hatchAllEggs = () => {
-    if (eggs <= 0) return;
-    
-    setIsHatching(true);
-    const newPets: Pet[] = [];
-    // New logic: 1 egg = 0 pets, 2 eggs = 1 pet, 3 eggs = 2 pets, etc.
-    let petsToHatch = Math.max(0, eggs - 1);
-    
-    for (let i = 0; i < petsToHatch; i++) {
-      const roll = Math.random() * 100;
-      let pet: Pet | null = null;
-
-      if (roll <= 15 * luckMultiplier) { // 15% Star
-        pet = { id: `pet-${Date.now()}-${i}`, type: PetType.LUCKY_STAR, name: 'Star Pet', rarity: 'Rare', chance: 15, acquiredAt: Date.now() };
-      }
-      
-      if (pet) newPets.push(pet);
-    }
-
-    setHatchedPets(newPets);
-    
-    // Animation delay
-    setTimeout(() => {
-      setPets(prev => [...prev, ...newPets]);
-      setEggs(0);
-      setIsHatching(false);
-      
-      if (newPets.length > 0) {
-        setLuckyMessage(`✨ Incredible! You hatched ${newPets.length} new pets!`);
-      } else {
-        setLuckyMessage("✨ Your luck is growing! Keep searching for pets!");
-      }
-      
-      // Auto-hide message after 10 seconds
-      setTimeout(() => setLuckyMessage(''), 10000);
-      
-      // Update leaderboard
-      updateLeaderboard(pets.length + newPets.length, [...pets, ...newPets]);
-    }, 2000);
-  };
-
-  const updateLeaderboard = (count: number, allPets: Pet[], currentCoins: number = coins) => {
+  const updateLeaderboard = (score: number) => {
+    const entryId = userId || 'local-user';
     const currentUserEntry: LeaderboardEntry = {
-      id: 'user-current',
-      username: nickname || getUsername(userEmail),
-      eggs: eggs,
-      petsCount: count,
-      rareItems: allPets.filter(p => p.rarity === 'Legendary' || p.rarity === 'Epic').map(p => p.name),
-      score: count * 100 + allPets.filter(p => p.rarity === 'Legendary' || p.rarity === 'Epic').length * 500 + currentCoins,
-      coins: currentCoins,
-      isPremium: isPremium
+      id: entryId,
+      username: nickname || userEmail.split('@')[0],
+      score: score,
+      isPremium: isPremium,
+      isVerified: isVerified
     };
     
     setLeaderboard(prev => {
-      const filtered = prev.filter(e => e.id !== 'user-current');
-      return [...filtered, currentUserEntry];
+      const filtered = prev.filter(e => e.id !== entryId);
+      return [...filtered, currentUserEntry].sort((a, b) => b.score - a.score);
     });
-  };
-
-  const getEggReward = (rarity: string) => {
-    switch (rarity) {
-      case 'Legendary': return 10;
-      case 'Epic': return 5;
-      case 'Rare': return 2;
-      default: return 1;
-    }
-  };
-
-  const handleDeletePet = (petId: string) => {
-    const petToDelete = pets.find(p => p.id === petId);
-    if (!petToDelete) return;
-
-    const reward = getEggReward(petToDelete.rarity);
-    setPets(prev => prev.filter(p => p.id !== petId));
-    setEggs(prev => prev + reward);
-    setLuckyMessage(`♻️ Released ${petToDelete.name} and received ${reward} egg${reward > 1 ? 's' : ''}!`);
-    setTimeout(() => setLuckyMessage(''), 10000);
-    
-    // Update leaderboard after state change (using functional update or local calc)
-    const newPetsList = pets.filter(p => p.id !== petId);
-    updateLeaderboard(newPetsList.length, newPetsList);
-  };
-
-  const handleDeleteAllPets = () => {
-    let totalReward = 0;
-    pets.forEach(pet => {
-      totalReward += getEggReward(pet.rarity);
-    });
-
-    setPets([]);
-    setEggs(prev => prev + totalReward);
-    setLuckyMessage(`♻️ Released all pets and received ${totalReward} eggs!`);
-    setTimeout(() => setLuckyMessage(''), 10000);
-    updateLeaderboard(0, []);
   };
 
   const recognitionRef = useRef<any>(null);
@@ -997,72 +815,22 @@ const App: React.FC = () => {
       const parts = queryToUse.trim().split(/\s+/);
       const command = parts[0].toLowerCase();
 
-      // /give [target?] [amount] [item]
-      // /ungive [target?] [amount] [item]
-      if (command === '/give' || command === '/ungive') {
-        let target = 'me';
-        let amount = 0;
-        let item = '';
-
-        if (parts.length === 3) {
-          amount = parseInt(parts[1]);
-          item = parts[2].toLowerCase();
-        } else if (parts.length >= 4) {
-          target = parts[1];
-          amount = parseInt(parts[2]);
-          item = parts[3].toLowerCase();
-        }
-
-        if (!isNaN(amount) && (item === 'egg' || item === 'eggs' || item === 'coin' || item === 'coins')) {
-          const isGive = command === '/give';
-          const change = isGive ? amount : -amount;
-          const isEgg = item.startsWith('egg');
-
-          if (target.toLowerCase() === 'me' || target === nickname || target === getUsername(userEmail)) {
-            if (isEgg) {
-              setEggs(prev => Math.max(0, prev + change));
-            } else {
-              setCoins(prev => Math.max(0, prev + change));
-            }
-            setLuckyMessage(`🎁 Admin: ${isGive ? 'Added' : 'Removed'} ${amount} ${item} ${isGive ? 'to' : 'from'} your stash!`);
-          } else {
-            // Target someone else in Firestore
-            const q = query(collection(db, 'users'), where('nickname', '==', target));
-            getDocs(q).then(snapshot => {
-              if (!snapshot.empty) {
-                const userDoc = snapshot.docs[0];
-                const data = userDoc.data();
-                if (isEgg) {
-                  updateDoc(userDoc.ref, { eggs: Math.max(0, (data.eggs || 0) + change) });
-                } else {
-                  updateDoc(userDoc.ref, { coins: Math.max(0, (data.coins || 0) + change) });
-                }
-                setLuckyMessage(`🎁 Admin: ${isGive ? 'Added' : 'Removed'} ${amount} ${item} to ${target}'s account!`);
-              } else {
-                setLuckyMessage(`❌ Admin: User "${target}" not found.`);
-              }
-            });
-          }
-          
-          setTimeout(() => setLuckyMessage(''), 5000);
-          setInput('');
-          setAdminCommandInput('');
-          if (!adminKeepOpen) setIsAdminPanelOpen(false);
-          return;
-        }
+      // /admin
+      if (command === '/admin') {
+        setIsAdminPanelOpen(true);
+        setAdminCommandInput('');
+        return;
       }
-
+      
       // /announcement [message]
       if (command === '/announcement' && parts.length >= 2) {
         const msg = parts.slice(1).join(' ');
         setDoc(doc(db, 'announcements', 'global'), {
           text: msg,
-          sender: nickname || getUsername(userEmail),
+          sender: nickname || userEmail.split('@')[0],
           timestamp: serverTimestamp(),
           active: true
         });
-        setLuckyMessage(`📢 Admin: Announcement sent to everyone!`);
-        setTimeout(() => setLuckyMessage(''), 5000);
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1076,35 +844,9 @@ const App: React.FC = () => {
           timestamp: serverTimestamp(),
           active: false
         });
-        setLuckyMessage(`📢 Admin: Announcement cleared.`);
-        setTimeout(() => setLuckyMessage(''), 5000);
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
-      }
-
-      // /reseteggs
-      if (command === '/reseteggs') {
-        setEggs(0);
-        setLuckyMessage(`🎁 Admin: Eggs reset to 0`);
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setAdminCommandInput('');
-        if (!adminKeepOpen) setIsAdminPanelOpen(false);
-        return;
-      }
-
-      // /seteggs [amount]
-      if (command === '/seteggs' && parts.length >= 2) {
-        const amount = parseInt(parts[1]);
-        if (!isNaN(amount)) {
-          setEggs(amount);
-          setLuckyMessage(`🎁 Admin: Set eggs to ${amount}`);
-          setTimeout(() => setLuckyMessage(''), 5000);
-          setInput('');
-          setAdminCommandInput('');
-          if (!adminKeepOpen) setIsAdminPanelOpen(false);
-          return;
-        }
       }
 
       // /ban [nickname]
@@ -1114,13 +856,8 @@ const App: React.FC = () => {
         getDocs(q).then(snapshot => {
           if (!snapshot.empty) {
             updateDoc(snapshot.docs[0].ref, { isBanned: true });
-            setLuckyMessage(`🚫 Admin: Banned ${target}`);
-          } else {
-            setLuckyMessage(`❌ Admin: User "${target}" not found.`);
           }
         });
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setInput('');
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1133,13 +870,8 @@ const App: React.FC = () => {
         getDocs(q).then(snapshot => {
           if (!snapshot.empty) {
             updateDoc(snapshot.docs[0].ref, { isBanned: false });
-            setLuckyMessage(`✅ Admin: Unbanned ${target}`);
-          } else {
-            setLuckyMessage(`❌ Admin: User "${target}" not found.`);
           }
         });
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setInput('');
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1148,22 +880,16 @@ const App: React.FC = () => {
       // /verify [nickname]
       if (command === '/verify' && parts.length >= 2) {
         const target = parts[1];
-        if (target.toLowerCase() === 'me' || target === nickname || target === getUsername(userEmail)) {
+        if (target.toLowerCase() === 'me' || target === nickname) {
           setIsVerified(true);
-          setLuckyMessage(`✅ Admin: You are now VERIFIED!`);
         } else {
           const q = query(collection(db, 'users'), where('nickname', '==', target));
           getDocs(q).then(snapshot => {
             if (!snapshot.empty) {
               updateDoc(snapshot.docs[0].ref, { isVerified: true });
-              setLuckyMessage(`✅ Admin: Verified ${target}`);
-            } else {
-              setLuckyMessage(`❌ Admin: User "${target}" not found.`);
             }
           });
         }
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setInput('');
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1172,30 +898,16 @@ const App: React.FC = () => {
       // /unverify [nickname]
       if (command === '/unverify' && parts.length >= 2) {
         const target = parts[1];
-        if (target.toLowerCase() === 'me' || target === nickname || target === getUsername(userEmail)) {
+        if (target.toLowerCase() === 'me' || target === nickname) {
           setIsVerified(false);
-          setLuckyMessage(`✅ Admin: Your verification has been removed.`);
         } else {
           const q = query(collection(db, 'users'), where('nickname', '==', target));
           getDocs(q).then(snapshot => {
             if (!snapshot.empty) {
               updateDoc(snapshot.docs[0].ref, { isVerified: false });
-              setLuckyMessage(`✅ Admin: Unverified ${target}`);
-            } else {
-              setLuckyMessage(`❌ Admin: User "${target}" not found.`);
             }
           });
         }
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setInput('');
-        setAdminCommandInput('');
-        if (!adminKeepOpen) setIsAdminPanelOpen(false);
-        return;
-      }
-
-      // /hatch
-      if (command === '/hatch') {
-        hatchAllEggs();
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1204,8 +916,6 @@ const App: React.FC = () => {
       // /clearhistory
       if (command === '/clearhistory') {
         clearHistory();
-        setLuckyMessage(`🧹 Admin: History cleared`);
-        setTimeout(() => setLuckyMessage(''), 5000);
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1213,69 +923,8 @@ const App: React.FC = () => {
 
       // /resetall
       if (command === '/resetall') {
-        setEggs(0);
-        setCoins(0);
-        setPets([]);
-        setLeaderboard(prev => prev.filter(e => e.id !== 'user-current'));
-        
-        localStorage.removeItem('tsai-eggs');
-        localStorage.removeItem('tsai-coins');
-        localStorage.removeItem('tsai-pets');
-        
-        setLuckyMessage(`🧹 Admin: Total Reset Executed. You have been removed from the leaderboard.`);
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setAdminCommandInput('');
-        if (!adminKeepOpen) setIsAdminPanelOpen(false);
-        return;
-      }
-
-      // /announce [message]
-      if (command === '/announce' && parts.length >= 2) {
-        const msg = parts.slice(1).join(' ');
-        
-        // Global Announcement Sync via Firestore
-        setDoc(doc(db, 'announcements', 'global'), {
-          text: msg,
-          sender: nickname || getUsername(userEmail),
-          timestamp: Date.now(),
-          active: true
-        }).catch(err => console.error("Firebase Error:", err));
-
-        setLuckyMessage(`📢 Admin: Global Announcement sent!`);
-        
-        // Auto-clear announcement after 5 seconds
-        setTimeout(() => {
-          setDoc(doc(db, 'announcements', 'global'), {
-            active: false
-          }, { merge: true }).catch(err => console.error("Firebase Error:", err));
-        }, 5000);
-
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setInput('');
-        setAdminCommandInput('');
-        if (!adminKeepOpen) setIsAdminPanelOpen(false);
-        return;
-      }
-
-      // /clearannouncement
-      if (command === '/clearannouncement') {
-        setDoc(doc(db, 'announcements', 'global'), {
-          active: false
-        }, { merge: true }).catch(err => console.error("Firebase Error:", err));
-        
-        setLuckyMessage(`📢 Admin: Global Announcement cleared!`);
-        setTimeout(() => setLuckyMessage(''), 5000);
-        setAdminCommandInput('');
-        if (!adminKeepOpen) setIsAdminPanelOpen(false);
-        return;
-      }
-
-      // /giveall
-      if (command === '/giveall') {
-        setEggs(prev => prev + 10000);
-        setCoins(prev => prev + 10000000);
-        setLuckyMessage(`🎁 Admin: Massive Resource Injection Executed`);
-        setTimeout(() => setLuckyMessage(''), 5000);
+        const entryId = userId || 'local-user';
+        setLeaderboard(prev => prev.filter(e => e.id !== entryId));
         setAdminCommandInput('');
         if (!adminKeepOpen) setIsAdminPanelOpen(false);
         return;
@@ -1349,7 +998,11 @@ const App: React.FC = () => {
 
   const openTool = (type: ToolType) => {
     setActiveTab(type);
-    setView(ViewState.TOOL);
+    if (type === ToolType.GENERAL) {
+      setView(ViewState.GENERAL);
+    } else {
+      setView(ViewState.TOOL);
+    }
     setResponse('');
     setSources([]);
     setStudySet(null);
@@ -1476,35 +1129,6 @@ const App: React.FC = () => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isHatching && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-green-950/90 backdrop-blur-2xl flex flex-col items-center justify-center text-center p-10"
-          >
-            <motion.div
-              animate={{ 
-                rotate: [0, -10, 10, -10, 10, 0],
-                scale: [1, 1.1, 1, 1.1, 1],
-                y: [0, -20, 0, -20, 0]
-              }}
-              transition={{ duration: 0.5, repeat: Infinity }}
-              className="relative"
-            >
-              <div className="text-9xl mb-8">🥚</div>
-              <motion.div 
-                animate={{ opacity: [0, 1, 0], scale: [0.5, 1.5, 0.5] }}
-                transition={{ duration: 1, repeat: Infinity }}
-                className="absolute inset-0 flex items-center justify-center"
-              >
-                <Sparkles className="w-32 h-32 text-yellow-400" />
-              </motion.div>
-            </motion.div>
-            <h2 className="text-4xl sm:text-6xl font-black text-white premium-font tracking-tighter mt-8 animate-pulse">HATCHING ALL EGGS...</h2>
-            <p className="text-amber-400 font-black uppercase tracking-widest mt-4">May the luck of the stars be with you!</p>
-          </motion.div>
-        )}
       </AnimatePresence>
 
       <div className="fixed top-3 right-3 sm:top-8 sm:right-8 z-[80] animate-in slide-in-from-right-4 duration-500">
@@ -1697,6 +1321,105 @@ const App: React.FC = () => {
               onOpenTool={openTool}
             />
           </motion.div>
+        ) : view === ViewState.GENERAL ? (
+          <div className="fixed inset-0 z-[100] bg-[#f8fafc] overflow-hidden flex flex-col">
+            <div className="absolute inset-0 opacity-40">
+              <div className="absolute inset-0 bg-gradient-to-b from-blue-50 to-white"></div>
+              <div className="absolute top-[10%] left-[5%] w-[30vw] h-[30vw] bg-blue-400/10 rounded-full blur-[100px]"></div>
+              <div className="absolute bottom-[20%] right-[10%] w-[40vw] h-[40vw] bg-indigo-400/10 rounded-full blur-[120px]"></div>
+            </div>
+
+            <div className="relative z-10 flex flex-col h-full">
+              <header className="p-6 sm:p-10 flex items-center justify-between border-b border-slate-200/50 bg-white/50 backdrop-blur-xl">
+                <button 
+                  onClick={() => setView(ViewState.HOME)}
+                  className="group flex items-center gap-3 text-slate-400 hover:text-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
+                >
+                  <div className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center group-hover:border-slate-400 group-hover:bg-white transition-all">
+                    <ChevronLeft className="w-5 h-5 text-slate-600" />
+                  </div>
+                  Return to Hub
+                </button>
+                <div className="flex items-center gap-4">
+                  <div className="hidden sm:flex flex-col items-end">
+                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">General Intelligence</span>
+                    <span className="text-[8px] text-slate-400 uppercase tracking-widest">Global Protocol</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center shadow-sm">
+                    <MessageSquare className="w-6 h-6 text-blue-600" />
+                  </div>
+                </div>
+              </header>
+
+              <main className="flex-1 overflow-y-auto px-6 sm:px-10 pb-20 scrollbar-hide">
+                <div className="max-w-4xl mx-auto pt-10 sm:pt-20">
+                  <div className="mb-12 sm:mb-20 text-center">
+                    <h1 className="text-5xl sm:text-8xl font-black text-slate-900 premium-font leading-[0.85] tracking-tighter mb-6">
+                      INQUIRY<span className="text-blue-600">.</span>
+                    </h1>
+                    <p className="text-slate-400 text-sm sm:text-xl max-w-xl mx-auto leading-relaxed">
+                      Ask anything. From quantum physics to history, our general intelligence module is at your command.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-12">
+                    <div className="space-y-6">
+                      <div className="relative group">
+                        <textarea
+                          value={input}
+                          onChange={(e) => setInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (setActiveTab(ToolType.GENERAL), handleSubmit())}
+                          placeholder="What is your priority inquiry?"
+                          className="w-full bg-white border border-slate-200 rounded-[2rem] p-8 sm:p-12 text-slate-800 text-xl sm:text-3xl font-medium focus:ring-4 focus:ring-blue-500/10 outline-none placeholder:text-slate-200 transition-all min-h-[150px] sm:min-h-[200px] resize-none shadow-xl"
+                        />
+                        <button 
+                          onClick={() => {
+                            setActiveTab(ToolType.GENERAL);
+                            handleSubmit();
+                          }}
+                          disabled={loading || !input.trim()}
+                          className="absolute bottom-6 right-6 sm:bottom-10 sm:right-10 p-4 sm:p-6 rounded-full bg-blue-600 text-white hover:bg-blue-500 transition-all shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed group-hover:scale-110 active:scale-95"
+                        >
+                          <Send className="w-6 h-6 sm:w-8 sm:h-8" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {response && (
+                      <div className="animate-in fade-in slide-in-from-bottom-12 duration-1000">
+                        <div className="p-8 sm:p-16 rounded-[3rem] bg-white border border-slate-200 shadow-2xl relative">
+                          <div className="absolute top-8 right-8 flex gap-3">
+                            {isSpeaking ? (
+                              <button onClick={stopSpeaking} className="p-3 rounded-2xl bg-blue-600 text-white animate-pulse"><Square className="w-5 h-5 fill-current" /></button>
+                            ) : (
+                              <button onClick={() => speak(response)} className="p-3 rounded-2xl bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"><Volume2 className="w-5 h-5" /></button>
+                            )}
+                          </div>
+                          <div className="prose prose-slate prose-lg sm:prose-2xl max-w-none">
+                            <div className="markdown-body text-slate-700 leading-relaxed">
+                              <Markdown>{response}</Markdown>
+                            </div>
+                          </div>
+                          {sources.length > 0 && (
+                            <div className="mt-12 pt-8 border-t border-slate-100">
+                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Verified Intelligence Sources</p>
+                               <div className="flex flex-wrap gap-2">
+                                 {sources.map((s, i) => (
+                                   <a key={i} href={s.uri} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold text-slate-600 hover:border-blue-200 hover:text-blue-600 transition-all flex items-center gap-2">
+                                     <Globe className="w-3 h-3" /> {s.title}
+                                   </a>
+                                 ))}
+                               </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </main>
+            </div>
+          </div>
         ) : view === ViewState.TALES ? (
           <div className="fixed inset-0 z-[100] bg-black overflow-hidden flex flex-col">
             <div className="absolute inset-0 opacity-40">
@@ -1792,19 +1515,6 @@ const App: React.FC = () => {
               onBack={() => setView(ViewState.HOME)} 
             />
           </div>
-        ) : view === ViewState.PETS ? (
-          <PetDisplay 
-            pets={pets} 
-            eggs={eggs}
-            coins={coins}
-            pendingCoins={pendingCoins}
-            isHatching={isHatching}
-            onHatchAll={hatchAllEggs}
-            onBack={() => setView(ViewState.HOME)} 
-            onDeletePet={handleDeletePet}
-            onDeleteAllPets={handleDeleteAllPets}
-            onCollect={collectCoins}
-          />
         ) : (
           <div className="flex flex-col gap-6 sm:gap-8 animate-in fade-in slide-in-from-right-4 duration-500 max-w-5xl mx-auto">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2151,16 +1861,6 @@ const App: React.FC = () => {
       </main>
 
       <div className="fixed bottom-4 left-4 sm:bottom-10 sm:left-10 z-[70] flex flex-col gap-3">
-        {luckyMessage && (
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="glass-panel p-4 rounded-2xl border-l-4 border-green-500 bg-green-900/40 text-white text-xs font-bold shadow-2xl mb-2 max-w-xs"
-          >
-            {luckyMessage}
-          </motion.div>
-        )}
       </div>
 
       <div className="fixed top-24 right-4 z-[70]">
@@ -2175,6 +1875,19 @@ const App: React.FC = () => {
       </div>
 
       <div className="fixed left-0 top-1/2 -translate-y-1/2 z-[60] flex flex-col gap-2">
+        <button 
+          onClick={() => {
+            setInput('');
+            setResponse('');
+            setView(ViewState.GENERAL);
+          }}
+          className="group bg-blue-600 text-white p-4 sm:p-6 rounded-r-[2rem] sm:rounded-r-[3rem] shadow-2xl flex flex-col items-center gap-4 hover:pr-10 sm:hover:pr-12 transition-all active:scale-95 border-y border-r border-white/10"
+          title="Open General Inquiry"
+        >
+          <MessageSquare className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+          <span className="[writing-mode:vertical-lr] text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] py-2">General</span>
+        </button>
+
         <button 
           onClick={() => {
             setInput('');
