@@ -1,6 +1,6 @@
 {
-  "name": "TSAI",
-  "description": "TSAI - The smartest AI. A high-stakes pet collection and luck-based game with global leaderboards, admin controls, and real-time announcements.",
+  "name": "TSAI v2.0",
+  "description": "TSAI v2.0 - The smartest AI platform. Featuring multi-modal tools, Hall of Excellence leaderboards, study architect, code execution sandbox, tales mode, and live network sync.",
   "requestFramePermissions": [
     "microphone"
   ]

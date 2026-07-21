@@ -1,11 +1,12 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&family=Space+Grotesk:wght@500;600;700;800;900&display=swap');
 @import url('https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/open-dyslexic.css');
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Playfair Display", serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
   --font-dyslexic: "OpenDyslexic", "Comic Sans MS", cursive, sans-serif;
 }
 
@@ -100,7 +101,8 @@
 
 @layer components {
   .premium-font {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+    letter-spacing: -0.03em;
   }
 
   .silver-white-bg {
@@ -114,12 +116,13 @@
   }
 
   .tsai-title-text {
-    background: linear-gradient(135deg, #b8860b, #d4af37, #b8860b);
+    font-family: 'Space Grotesk', sans-serif;
+    background: linear-gradient(135deg, #b8860b, #eab308, #d4af37, #64748b);
     background-size: 200% 200%;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     font-weight: 900;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.04em;
     animation: gold-shimmer 4s linear infinite;
   }
 

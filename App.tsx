@@ -1180,19 +1180,24 @@ const App: React.FC = () => {
       </div>
 
       <header className="z-10 px-4 py-8 sm:py-12 sm:pt-24 flex flex-col items-center">
-        <h1 
-          onClick={() => {
-            if (userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME) {
-              setIsAdminPanelOpen(true);
-            }
-          }}
-          className="text-5xl sm:text-8xl md:text-9xl tsai-title-text premium-font select-none mb-1 cursor-pointer"
-        >
-          TSAI
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 
+            onClick={() => {
+              if (userEmail === ADMIN_EMAIL || nickname === ADMIN_NICKNAME) {
+                setIsAdminPanelOpen(true);
+              }
+            }}
+            className="text-5xl sm:text-8xl md:text-9xl tsai-title-text premium-font select-none mb-1 cursor-pointer"
+          >
+            TSAI
+          </h1>
+          <span className="px-3 py-1 sm:px-4 sm:py-1.5 bg-amber-500/10 text-amber-600 border border-amber-500/30 rounded-full text-xs sm:text-base font-black uppercase tracking-widest shadow-sm">
+            v2.0
+          </span>
+        </div>
         <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
             <Sparkles className="w-4 h-4 text-amber-500" />
-            <p className="text-slate-400 text-[8px] sm:text-[11px] font-bold uppercase tracking-[0.3em]">Advanced Intelligence Core</p>
+            <p className="text-slate-400 text-[8px] sm:text-[11px] font-bold uppercase tracking-[0.3em]">Advanced Intelligence Core • v2.0 Protocol</p>
             <Sparkles className="w-4 h-4 text-amber-500" />
         </div>
         <div className="flex flex-wrap justify-center gap-2 sm:gap-4 w-full max-w-2xl px-2">
